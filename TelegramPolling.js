@@ -123,7 +123,12 @@ function processUpdate(update) {
     Logger.log('❌ خطأ في processUpdate: ' + error.toString());
     // محاولة إرسال رسالة خطأ للمستخدم
     try {
-      const chatId = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
+      var chatId = null;
+      if (update.message && update.message.chat) {
+        chatId = update.message.chat.id;
+      } else if (update.callback_query && update.callback_query.message && update.callback_query.message.chat) {
+        chatId = update.callback_query.message.chat.id;
+      }
       if (chatId) {
         sendMessage(chatId, '❌ حدث خطأ غير متوقع. حاول مرة أخرى.');
       }
