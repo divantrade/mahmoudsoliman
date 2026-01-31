@@ -6,6 +6,106 @@
  */
 
 const LAST_UPDATE_KEY = 'last_update_id';
+const PENDING_TRANS_PREFIX = 'pending_trans_';
+
+/**
+ * ⭐ حفظ معاملة معلقة للمراجعة
+ */
+function savePendingTransaction(chatId, transactionData) {
+  var cache = CacheService.getScriptCache();
+  var key = PENDING_TRANS_PREFIX + chatId;
+  cache.put(key, JSON.stringify(transactionData), 300); // 5 دقائق
+  Logger.log('Saved pending transaction for chat ' + chatId);
+}
+
+/**
+ * ⭐ استرجاع معاملة معلقة
+ */
+function getPendingTransaction(chatId) {
+  var cache = CacheService.getScriptCache();
+  var key = PENDING_TRANS_PREFIX + chatId;
+  var data = cache.get(key);
+  if (data) {
+    return JSON.parse(data);
+  }
+  return null;
+}
+
+/**
+ * ⭐ حذف معاملة معلقة
+ */
+function removePendingTransaction(chatId) {
+  var cache = CacheService.getScriptCache();
+  var key = PENDING_TRANS_PREFIX + chatId;
+  cache.remove(key);
+  Logger.log('Removed pending transaction for chat ' + chatId);
+}
+
+/**
+ * ⭐ إنشاء نموذج المراجعة
+ */
+function buildPreviewMessage(transactions) {
+  var msg = '📋 *مراجعة قبل الحفظ*\n';
+  msg += '━━━━━━━━━━━━━━━━━━━━━\n\n';
+
+  for (var i = 0; i < transactions.length; i++) {
+    var t = transactions[i];
+    msg += '🔹 *المعاملة ' + (i + 1) + ':*\n';
+    msg += '   النوع: ' + (t.type || '-') + '\n';
+    msg += '   المبلغ: ' + (t.amount || 0) + ' ' + (t.currency || 'ريال') + '\n';
+
+    if (t.amount_received) {
+      msg += '   المستلم: ' + t.amount_received + ' ' + (t.currency_received || 'جنيه') + '\n';
+    }
+    if (t.exchange_rate) {
+      msg += '   سعر الصرف: ' + t.exchange_rate + '\n';
+    }
+    if (t.category) {
+      msg += '   التصنيف: ' + t.category + '\n';
+    }
+    if (t.contact) {
+      msg += '   الجهة: ' + t.contact + '\n';
+    }
+    if (t.description) {
+      msg += '   الوصف: ' + t.description + '\n';
+    }
+    msg += '\n';
+  }
+
+  msg += '━━━━━━━━━━━━━━━━━━━━━\n';
+  msg += '⚠️ *هل البيانات صحيحة؟*';
+
+  return msg;
+}
+
+/**
+ * ⭐ إرسال نموذج المراجعة مع الأزرار
+ */
+function sendPreviewWithButtons(chatId, transactions, user) {
+  var previewMsg = buildPreviewMessage(transactions);
+
+  // حفظ المعاملات المعلقة
+  savePendingTransaction(chatId, {
+    transactions: transactions,
+    user: user,
+    timestamp: new Date().getTime()
+  });
+
+  // أزرار التأكيد والإلغاء
+  var keyboard = {
+    inline_keyboard: [
+      [
+        { text: '✅ تأكيد وحفظ', callback_data: 'confirm_save' },
+        { text: '❌ إلغاء', callback_data: 'cancel_save' }
+      ],
+      [
+        { text: '✏️ تعديل الرسالة', callback_data: 'edit_message' }
+      ]
+    ]
+  };
+
+  sendMessage(chatId, previewMsg, keyboard);
+}
 
 /**
  * الدالة الرئيسية - تعمل 55 ثانية متواصلة
@@ -436,27 +536,8 @@ function processCustodyDirectly(chatId, text, user) {
     };
     Logger.log('Transaction data: ' + JSON.stringify(transData));
 
-    // حفظ في شيت الحركات الرئيسي
-    var result = addTransaction(transData);
-    Logger.log('addTransaction result: ' + JSON.stringify(result));
-
-    if (result && result.success) {
-      var msg = '✅ تم تسجيل عهدة ' + custodian + ':\n\n';
-      msg += '💰 المبلغ: ' + amount + ' ' + currency;
-      if (amountReceived && exchangeRate) {
-        msg += '\n📥 المستلم: ' + amountReceived + ' ' + currencyReceived;
-        msg += '\n💱 سعر الصرف: ' + exchangeRate;
-      }
-      msg += '\n\n📋 تم الحفظ في شيت الحركات';
-      sendMessage(chatId, msg);
-    } else {
-      var errorMsg = '❌ فشل تسجيل العهدة';
-      if (result && result.message) {
-        errorMsg += ':\n' + result.message;
-      }
-      Logger.log('ERROR: ' + errorMsg);
-      sendMessage(chatId, errorMsg);
-    }
+    // ⭐⭐⭐ إرسال نموذج المراجعة بدلاً من الحفظ المباشر ⭐⭐⭐
+    sendPreviewWithButtons(chatId, [transData], user);
 
   } catch (error) {
     Logger.log('EXCEPTION in processCustodyDirectly: ' + error.toString());
@@ -505,27 +586,28 @@ function processUserMessage(chatId, text, user) {
       return;
     }
 
-    let successCount = 0;
-    const details = [];
-
     Logger.log('Transactions array: ' + JSON.stringify(transactions));
 
     if (transactions && transactions.length > 0) {
       Logger.log('Found ' + transactions.length + ' transactions to process');
-      for (let i = 0; i < transactions.length; i++) {
-        const trans = transactions[i];
+
+      // تحويل المعاملات للتنسيق الموحد
+      var processedTransactions = [];
+
+      for (var i = 0; i < transactions.length; i++) {
+        var trans = transactions[i];
         Logger.log('Transaction ' + i + ': ' + JSON.stringify(trans));
 
         // تحويل العملة من العربي للكود
-        const currencyMap = { 'ريال': 'ريال', 'جنيه': 'جنيه', 'دولار': 'دولار', 'SAR': 'ريال', 'EGP': 'جنيه', 'USD': 'دولار' };
-        const rawCurrency = trans.عملة || trans.currency || 'ريال';
-        const currency = currencyMap[rawCurrency] || 'ريال';
+        var currencyMap = { 'ريال': 'ريال', 'جنيه': 'جنيه', 'دولار': 'دولار', 'SAR': 'ريال', 'EGP': 'جنيه', 'USD': 'دولار' };
+        var rawCurrency = trans.عملة || trans.currency || 'ريال';
+        var currency = currencyMap[rawCurrency] || 'ريال';
 
-        const rawCurrencyReceived = trans.عملة_مستلمة || trans.currency_received || 'جنيه';
-        const currencyReceived = currencyMap[rawCurrencyReceived] || 'جنيه';
+        var rawCurrencyReceived = trans.عملة_مستلمة || trans.currency_received || 'جنيه';
+        var currencyReceived = currencyMap[rawCurrencyReceived] || 'جنيه';
 
         // تحويل المفاتيح العربية للحفظ
-        const transData = {
+        var transData = {
           type: trans.نوع || trans.type,
           amount: trans.مبلغ || trans.amount,
           currency: currency,
@@ -547,61 +629,15 @@ function processUserMessage(chatId, text, user) {
           transData.exchange_rate = (transData.amount_received / transData.amount).toFixed(2);
         }
 
-        let result;
-        let detail = '';
-
-        // ⭐⭐⭐ جميع المعاملات تُحفظ في شيت الحركات الرئيسي ⭐⭐⭐
-        Logger.log('Processing transaction type: ' + transData.type);
-        Logger.log('Full transData: ' + JSON.stringify(transData));
-
-        // حفظ المعاملة في شيت الحركات الرئيسي (بما فيها العهدة)
-        result = addTransaction(transData);
-        Logger.log('addTransaction result: ' + JSON.stringify(result));
-
-        if (result && result.success) {
-          detail = transData.type + ': ' + transData.amount + ' ' + transData.currency;
-
-          // إضافة تفاصيل التحويل/سعر الصرف
-          if (transData.amount_received && transData.exchange_rate) {
-            detail += ' ← ' + transData.amount_received + ' ' + transData.currency_received;
-            detail += ' (سعر: ' + transData.exchange_rate + ')';
-          }
-
-          // إضافة جهة الاتصال
-          if (transData.contact) {
-            detail += ' لـ ' + transData.contact;
-          }
-
-          // لو عهدة، نحسب الرصيد من شيت الحركات
-          if (transData.type === 'إيداع_عهدة' || transData.type === 'صرف_من_عهدة') {
-            var custodian = transData.contact || 'سارة';
-            var balance = calculateCustodyBalanceFromTransactions(custodian);
-            detail += '\n   💼 رصيد العهدة: ' + balance + ' جنيه';
-          }
-        }
-
-        if (result && result.success) {
-          successCount++;
-          details.push(detail);
-        }
+        processedTransactions.push(transData);
       }
-    }
 
-    if (successCount > 0) {
-      let msg = '✅ تم تسجيل ' + successCount + ' معاملة:\n\n';
-      for (let i = 0; i < details.length; i++) {
-        msg += '• ' + details[i] + '\n';
-      }
-      if (message) {
-        msg += '\n' + message;
-      }
-      sendMessage(chatId, msg);
+      // ⭐⭐⭐ إرسال نموذج المراجعة بدلاً من الحفظ المباشر ⭐⭐⭐
+      sendPreviewWithButtons(chatId, processedTransactions, user);
+
     } else {
-      Logger.log('No successful transactions. successCount=' + successCount);
-      let errorMsg = '❌ لم يتم التسجيل.\n\n';
-      if (!transactions || transactions.length === 0) {
-        errorMsg += 'لم أفهم الرسالة. ';
-      }
+      Logger.log('No transactions found');
+      var errorMsg = '❌ لم أفهم الرسالة.\n\n';
       errorMsg += 'جرب:\n• حولت لسارة 5000 عهدة\n• صرفت 100 غداء';
       sendMessage(chatId, errorMsg);
     }
@@ -709,15 +745,28 @@ function sendReportMenu(chatId) {
  * معالجة أزرار
  */
 function handleCallbackQuery(callbackQuery) {
-  const chatId = callbackQuery.message.chat.id;
-  const userId = callbackQuery.from.id;
-  const data = callbackQuery.data;
+  var chatId = callbackQuery.message.chat.id;
+  var userId = callbackQuery.from.id;
+  var data = callbackQuery.data;
 
   Logger.log('🔘 Button: ' + data);
 
-  const user = getUserByTelegramId(userId);
+  var user = getUserByTelegramId(userId);
 
   switch (data) {
+    // ⭐⭐⭐ أزرار تأكيد/إلغاء المعاملة ⭐⭐⭐
+    case 'confirm_save':
+      handleConfirmSave(chatId, user);
+      break;
+
+    case 'cancel_save':
+      handleCancelSave(chatId);
+      break;
+
+    case 'edit_message':
+      handleEditMessage(chatId);
+      break;
+
     case 'menu_reports':
       sendReportMenu(chatId);
       break;
@@ -751,6 +800,92 @@ function handleCallbackQuery(callbackQuery) {
   }
 
   answerCallbackQuery(callbackQuery.id);
+}
+
+/**
+ * ⭐ معالجة تأكيد الحفظ
+ */
+function handleConfirmSave(chatId, user) {
+  Logger.log('=== handleConfirmSave ===');
+
+  var pending = getPendingTransaction(chatId);
+  if (!pending || !pending.transactions) {
+    sendMessage(chatId, '⏰ انتهت صلاحية المعاملة. أعد كتابة الرسالة.');
+    return;
+  }
+
+  var transactions = pending.transactions;
+  var successCount = 0;
+  var savedIds = [];
+  var details = [];
+
+  for (var i = 0; i < transactions.length; i++) {
+    var transData = transactions[i];
+    transData.user_name = user.name;
+    transData.telegram_id = user.telegram_id;
+
+    var result = addTransaction(transData);
+    Logger.log('Save result: ' + JSON.stringify(result));
+
+    if (result && result.success) {
+      successCount++;
+      savedIds.push(result.id);
+
+      var detail = transData.type + ': ' + transData.amount + ' ' + transData.currency;
+      if (transData.contact) {
+        detail += ' لـ ' + transData.contact;
+      }
+
+      // لو عهدة، نحسب الرصيد
+      if (transData.type === 'إيداع_عهدة' || transData.type === 'صرف_من_عهدة') {
+        var custodian = transData.contact || 'سارة';
+        var balance = calculateCustodyBalanceFromTransactions(custodian);
+        detail += '\n   💼 رصيد العهدة: ' + balance + ' جنيه';
+      }
+
+      details.push(detail);
+    }
+  }
+
+  // حذف المعاملة المعلقة
+  removePendingTransaction(chatId);
+
+  if (successCount > 0) {
+    var msg = '✅ *تم الحفظ بنجاح!*\n';
+    msg += '━━━━━━━━━━━━━━━━━━━━━\n\n';
+
+    // عرض أرقام الحركات
+    msg += '🔢 *رقم الحركة:* ';
+    if (savedIds.length === 1) {
+      msg += '#' + savedIds[0] + '\n\n';
+    } else {
+      msg += savedIds.map(function(id) { return '#' + id; }).join('، ') + '\n\n';
+    }
+
+    for (var j = 0; j < details.length; j++) {
+      msg += '• ' + details[j] + '\n';
+    }
+
+    sendMessage(chatId, msg);
+  } else {
+    sendMessage(chatId, '❌ فشل حفظ المعاملة. حاول مرة أخرى.');
+  }
+}
+
+/**
+ * ⭐ معالجة إلغاء الحفظ
+ */
+function handleCancelSave(chatId) {
+  removePendingTransaction(chatId);
+  sendMessage(chatId, '🚫 تم إلغاء المعاملة.\n\nيمكنك إعادة كتابة الرسالة بالتفاصيل الصحيحة.');
+}
+
+/**
+ * ⭐ معالجة تعديل الرسالة
+ */
+function handleEditMessage(chatId) {
+  removePendingTransaction(chatId);
+  sendMessage(chatId, '✏️ أعد كتابة رسالتك بالتفاصيل الصحيحة:\n\n• حولت لسارة 5000 عهدة\n• صرفت 100 غداء\n• استلمت راتب 8000');
 }
 
 /**
