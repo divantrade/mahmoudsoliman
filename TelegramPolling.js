@@ -549,25 +549,8 @@ function processCustodyDirectly(chatId, text, user) {
     };
     Logger.log('Transaction data: ' + JSON.stringify(transData));
 
-    // ⭐ حفظ مباشر في شيت الحركات
-    var result = addTransaction(transData);
-    Logger.log('addTransaction result: ' + JSON.stringify(result));
-
-    if (result && result.success) {
-      var msg = '✅ تم تسجيل عهدة ' + custodian + '\n';
-      msg += '━━━━━━━━━━━━━━━━━━━━━\n\n';
-      msg += '🔢 رقم الحركة: #' + result.id + '\n';
-      msg += '💰 المبلغ: ' + amount + ' ' + currency + '\n';
-      if (amountReceived && exchangeRate) {
-        msg += '📥 المستلم: ' + amountReceived + ' ' + currencyReceived + '\n';
-        msg += '💱 سعر الصرف: ' + exchangeRate + '\n';
-      }
-      var balance = calculateCustodyBalanceFromTransactions(custodian);
-      msg += '\n💼 رصيد العهدة: ' + balance + ' جنيه';
-      sendMessage(chatId, msg);
-    } else {
-      sendMessage(chatId, '❌ فشل تسجيل العهدة: ' + (result ? result.message : 'خطأ غير معروف'));
-    }
+    // ⭐ إرسال نموذج المراجعة (نفس المصروفات العادية)
+    sendPreviewWithButtons(chatId, [transData], user);
 
   } catch (error) {
     Logger.log('EXCEPTION in processCustodyDirectly: ' + error.toString());
