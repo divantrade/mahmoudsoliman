@@ -217,6 +217,11 @@ function handleCommand(chatId, text, user) {
       sendMessage(chatId, generateGoldReport());
       break;
 
+    case '/custody':
+    case '/عهدة':
+      sendCustodyReport(chatId, 'سارة');
+      break;
+
     case '/associations':
       sendMessage(chatId, generateAssociationsReport());
       break;
@@ -674,6 +679,46 @@ function answerCallbackQuery(callbackQueryId) {
       muteHttpExceptions: true
     });
   } catch (e) {}
+}
+
+/**
+ * ⭐ إعداد قائمة البوت الدائمة (تظهر عند الضغط على ☰)
+ * شغّل هذه الدالة مرة واحدة فقط
+ */
+function setupBotMenu() {
+  const commands = [
+    { command: 'start', description: '🏠 البداية والقائمة الرئيسية' },
+    { command: 'report', description: '📊 التقارير' },
+    { command: 'balance', description: '💰 الرصيد الحالي' },
+    { command: 'monthly', description: '📅 تقرير الشهر' },
+    { command: 'wife', description: '💕 تقرير الزوجة' },
+    { command: 'custody', description: '💼 عهدة سارة' },
+    { command: 'siblings', description: '👨‍👩‍👧‍👦 تقرير الإخوة' },
+    { command: 'gold', description: '💍 تقرير الذهب' },
+    { command: 'help', description: '❓ المساعدة' }
+  ];
+
+  try {
+    const url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/setMyCommands';
+    const response = UrlFetchApp.fetch(url, {
+      method: 'POST',
+      contentType: 'application/json',
+      payload: JSON.stringify({ commands: commands }),
+      muteHttpExceptions: true
+    });
+
+    const result = JSON.parse(response.getContentText());
+    if (result.ok) {
+      Logger.log('✅ تم إعداد قائمة البوت بنجاح!');
+      return '✅ تم إعداد قائمة البوت! اضغط على ☰ في تيليجرام لرؤية القائمة';
+    } else {
+      Logger.log('❌ فشل: ' + response.getContentText());
+      return '❌ فشل إعداد القائمة';
+    }
+  } catch (error) {
+    Logger.log('❌ Error: ' + error.toString());
+    return '❌ خطأ: ' + error.toString();
+  }
 }
 
 /**
