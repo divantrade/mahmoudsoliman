@@ -374,9 +374,13 @@ function processUserMessage(chatId, text, user) {
     let successCount = 0;
     const details = [];
 
+    Logger.log('Transactions array: ' + JSON.stringify(transactions));
+
     if (transactions && transactions.length > 0) {
+      Logger.log('Found ' + transactions.length + ' transactions to process');
       for (let i = 0; i < transactions.length; i++) {
         const trans = transactions[i];
+        Logger.log('Transaction ' + i + ': ' + JSON.stringify(trans));
 
         // تحويل العملة من العربي للكود
         const currencyMap = { 'ريال': 'ريال', 'جنيه': 'جنيه', 'دولار': 'دولار', 'SAR': 'ريال', 'EGP': 'جنيه', 'USD': 'دولار' };
@@ -413,21 +417,26 @@ function processUserMessage(chatId, text, user) {
         let detail = '';
 
         // التحقق من نوع المعاملة (عهدة أو عادية)
+        Logger.log('Processing transaction type: ' + transData.type);
+
         if (transData.type === 'إيداع_عهدة' || transData.type === 'صرف_من_عهدة') {
           // حركة عهدة
+          Logger.log('*** CUSTODY TRANSACTION DETECTED ***');
           const custodyData = {
             type: transData.type,
             custodian: transData.contact || 'سارة',
             amount: transData.amount,
-            currency: transData.currency,
+            currency: 'جنيه', // العهدة دائماً بالجنيه
             category: transData.category,
             beneficiary: transData.contact_name || '',
             description: transData.description,
             user_name: user.name,
             telegram_id: user.telegram_id
           };
+          Logger.log('Custody data: ' + JSON.stringify(custodyData));
 
           result = addCustodyTransaction(custodyData);
+          Logger.log('Custody result: ' + JSON.stringify(result));
 
           if (result && result.success) {
             detail = transData.type + ': ' + transData.amount + ' ' + transData.currency;
@@ -478,7 +487,13 @@ function processUserMessage(chatId, text, user) {
       }
       sendMessage(chatId, msg);
     } else {
-      sendMessage(chatId, '❌ لم يتم التسجيل.\n\nجرب: استلمت راتب 5000 ريال');
+      Logger.log('No successful transactions. successCount=' + successCount);
+      let errorMsg = '❌ لم يتم التسجيل.\n\n';
+      if (!transactions || transactions.length === 0) {
+        errorMsg += 'لم أفهم الرسالة. ';
+      }
+      errorMsg += 'جرب:\n• حولت لسارة 5000 عهدة\n• صرفت 100 غداء';
+      sendMessage(chatId, errorMsg);
     }
 
   } catch (error) {
