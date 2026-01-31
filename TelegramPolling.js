@@ -589,10 +589,19 @@ function processUserMessage(chatId, text, user) {
 
   try {
     // ⭐⭐⭐ فحص كلمة العهدة أولاً - معالجة مباشرة بدون Gemini ⭐⭐⭐
-    const hasOhdaKeyword = /عهد[ةه]|العهد[ةه]/i.test(text);
+    var textLower = text.toLowerCase();
+    var hasOhdaKeyword = (
+      textLower.indexOf('عهدة') !== -1 ||
+      textLower.indexOf('عهده') !== -1 ||
+      textLower.indexOf('العهدة') !== -1 ||
+      textLower.indexOf('العهده') !== -1
+    );
+
+    Logger.log('Checking for custody keyword in: ' + text);
+    Logger.log('Has custody keyword: ' + hasOhdaKeyword);
 
     if (hasOhdaKeyword) {
-      Logger.log('*** CUSTODY KEYWORD DETECTED ***');
+      Logger.log('*** CUSTODY KEYWORD DETECTED - Processing directly ***');
       processCustodyDirectly(chatId, text, user);
       return;
     }
