@@ -492,9 +492,21 @@ function processCustodyDirectly(chatId, text, user) {
     var currencyReceived = 'جنيه';
     var exchangeRate = null;
 
-    // نمط 1: "X ريال ما يعادل Y جنيه" أو "X ريال يعادل Y"
-    var exchangePattern = /(\d+)\s*(?:ريال|سعودي)\s*(?:ما\s*)?يعادل\s*(\d+)/i;
+    // نمط 1: "X ريال [كلمات اختيارية] ما يعادل Y"
+    // يدعم: "1000 ريال ما يعادل 12000" أو "1000 ريال عهده ما يعادل 12000"
+    var exchangePattern = /(\d+)\s*(?:ريال|سعودي)(?:\s+\S+)*\s*(?:ما\s*)?يعادل\s*(\d+)/i;
     var exchangeMatch = normalizedText.match(exchangePattern);
+
+    // نمط 2: لو لم يتطابق، نجرب البحث عن الرقم قبل "ريال" والرقم بعد "يعادل" بشكل منفصل
+    if (!exchangeMatch) {
+      var riyalMatch = normalizedText.match(/(\d+)\s*(?:ريال|سعودي)/i);
+      var equivalentMatch = normalizedText.match(/(?:ما\s*)?يعادل\s*(\d+)/i);
+
+      if (riyalMatch && equivalentMatch) {
+        exchangeMatch = [null, riyalMatch[1], equivalentMatch[1]];
+        Logger.log('Pattern 1b matched (separate): ' + riyalMatch[1] + ' ريال = ' + equivalentMatch[1]);
+      }
+    }
 
     if (exchangeMatch) {
       amount = parseInt(exchangeMatch[1]);
@@ -506,7 +518,7 @@ function processCustodyDirectly(chatId, text, user) {
       }
       Logger.log('Pattern 1 matched - Amount: ' + amount + ' SAR = ' + amountReceived + ' EGP, Rate: ' + exchangeRate);
     } else {
-      // نمط 2: "X جنيه" أو "X ريال" (بدون سعر صرف)
+      // نمط 3: "X جنيه" أو "X ريال" (بدون سعر صرف)
       var amounts = normalizedText.match(/(\d+)/g);
       if (amounts && amounts.length > 0) {
         amount = parseInt(amounts[0]);
@@ -530,7 +542,7 @@ function processCustodyDirectly(chatId, text, user) {
           }
         }
       }
-      Logger.log('Pattern 2 - Amount: ' + amount + ' ' + currency);
+      Logger.log('Pattern 3 - Amount: ' + amount + ' ' + currency);
     }
 
     // التحقق من وجود مبلغ
