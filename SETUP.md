@@ -5,7 +5,7 @@
 نظام محاسبي ذكي مبني على:
 - **Google Sheets** - لتخزين البيانات
 - **Google Apps Script** - للـ Backend
-- **Telegram Bot** - للتفاعل
+- **Telegram Bot** - للتفاعل (بنظام Polling)
 - **Gemini AI** - لفهم اللغة الطبيعية
 
 ---
@@ -15,7 +15,7 @@
 ### الخطوة 1: إنشاء Google Sheet
 
 1. اذهب إلى [Google Sheets](https://sheets.google.com)
-2. أنشئ ملف جديد باسم: **نظام محمود المحاسبي**
+2. أنشئ ملف جديد باسم: **حسابات محمود**
 3. احفظ رابط الملف
 
 ---
@@ -32,7 +32,7 @@
    - `Config.js`
    - `GeminiAI.js`
    - `SheetsManager.js`
-   - `TelegramHandler.js`
+   - `TelegramPolling.js` ⭐ (مهم - بدلاً من TelegramHandler.js)
    - `Reports.js`
 
 4. لإضافة ملف جديد:
@@ -45,55 +45,44 @@
 
 ### الخطوة 3: تحديث الإعدادات
 
-في ملف `Config.js`، تأكد من:
+في ملف `Config.js`، تأكد من صحة:
 
 ```javascript
 const CONFIG = {
-  TELEGRAM_BOT_TOKEN: '7746671910:AAGzLPtk6ZbQCcfHGWZpmfd7aeuHz3RyZKo',
-  GEMINI_API_KEY: 'AIzaSyCEJQTo4AjoFfUNmziTOWmUy8H7VoJGHEE',
+  TELEGRAM_BOT_TOKEN: 'YOUR_BOT_TOKEN',
+  GEMINI_API_KEY: 'YOUR_GEMINI_KEY',
   // ...
 };
 ```
 
 ---
 
-### الخطوة 4: نشر الـ Web App
+### الخطوة 4: تشغيل البوت ⭐ (الأهم)
 
-1. في Apps Script، اذهب إلى:
-   - **Deploy** (نشر) → **New deployment** (نشر جديد)
+**شغّل دالة واحدة فقط: `setupBot`**
 
-2. اختر:
-   - **Type**: Web app
-   - **Execute as**: Me
-   - **Who has access**: Anyone
+1. في القائمة المنسدلة (فوق)، اختر: **`setupBot`**
+2. اضغط **Run** ▶️
+3. إذا طلب صلاحيات:
+   - اضغط **Review Permissions**
+   - اختر حسابك
+   - **Advanced** → **Go to ... (unsafe)**
+   - **Allow**
 
-3. اضغط **Deploy**
-
-4. ستحصل على **Web App URL** - احفظه!
-
----
-
-### الخطوة 5: ربط البوت بـ Webhook
-
-1. في Apps Script، شغّل الدالة `setWebhook`:
-   - اختر `setWebhook` من القائمة المنسدلة
-   - اضغط **Run** (تشغيل)
-
-2. ستظهر رسالة تأكيد في Execution log
+4. ستصلك رسالة على التليجرام: "البوت يعمل بنجاح!"
 
 ---
 
-### الخطوة 6: تهيئة النظام
+### كيف يعمل البوت؟
 
-1. شغّل الدالة `initialize`:
-   - اختر `initialize` من القائمة
-   - اضغط **Run**
-
-2. سيتم إنشاء جميع الشيتات تلقائياً
+البوت يستخدم نظام **Polling** (فحص دوري):
+- يفحص الرسائل الجديدة كل **دقيقة**
+- لا يحتاج Web App أو Webhook
+- يعمل بشكل موثوق مع Google Apps Script
 
 ---
 
-### الخطوة 7: إعداد المهام المجدولة (اختياري)
+### الخطوة 5: إعداد المهام المجدولة (اختياري)
 
 1. شغّل الدالة `createTriggers`
 2. سيتم إنشاء:
