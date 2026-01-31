@@ -113,10 +113,23 @@ function saveLastUpdateId(updateId) {
 function processUpdate(update) {
   Logger.log('Processing: ' + JSON.stringify(update).substring(0, 300));
 
-  if (update.message) {
-    handleMessage(update.message);
-  } else if (update.callback_query) {
-    handleCallbackQuery(update.callback_query);
+  try {
+    if (update.message) {
+      handleMessage(update.message);
+    } else if (update.callback_query) {
+      handleCallbackQuery(update.callback_query);
+    }
+  } catch (error) {
+    Logger.log('❌ خطأ في processUpdate: ' + error.toString());
+    // محاولة إرسال رسالة خطأ للمستخدم
+    try {
+      const chatId = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
+      if (chatId) {
+        sendMessage(chatId, '❌ حدث خطأ غير متوقع. حاول مرة أخرى.');
+      }
+    } catch (e) {
+      Logger.log('Failed to send error message: ' + e.toString());
+    }
   }
 }
 
@@ -327,8 +340,20 @@ function processUserMessage(chatId, text, user) {
   sendChatAction(chatId, 'typing');
 
   try {
+    // ⭐ فحص أولي لكلمة العهدة
+    const hasOhdaKeyword = /عهد[ةه]|العهد[ةه]/i.test(text);
+    if (hasOhdaKeyword) {
+      Logger.log('⭐ كلمة عهدة موجودة في الرسالة');
+    }
+
     const parsed = parseMessageWithGemini(text, user.name);
     Logger.log('نتيجة: ' + JSON.stringify(parsed));
+
+    // ⭐ إذا فشل الـ API أو أرجع null
+    if (!parsed) {
+      sendMessage(chatId, '❌ حدث خطأ في الاتصال بالذكاء الاصطناعي.\n\nجرب مرة أخرى.');
+      return;
+    }
 
     // التحقق من النجاح (يدعم العربي والإنجليزي)
     const isSuccess = parsed && (parsed.نجاح === true || parsed.success === true);
@@ -452,8 +477,18 @@ function processUserMessage(chatId, text, user) {
     }
 
   } catch (error) {
-    Logger.log('خطأ: ' + error.toString());
-    sendMessage(chatId, '❌ حدث خطأ. حاول مرة أخرى.');
+    Logger.log('❌ خطأ في processUserMessage: ' + error.toString());
+    Logger.log('Stack: ' + error.stack);
+
+    // ⭐ رسالة خطأ مفصلة للمستخدم
+    let errorMsg = '❌ حدث خطأ في معالجة رسالتك.\n\n';
+    errorMsg += '💡 جرب كتابتها بشكل أبسط:\n';
+    errorMsg += '• حولت لسارة 5000 عهدة\n';
+    errorMsg += '• صرفت 100 غداء\n';
+    errorMsg += '• استلمت راتب 8000\n\n';
+    errorMsg += '🔧 الخطأ: ' + error.message;
+
+    sendMessage(chatId, errorMsg);
   }
 }
 
