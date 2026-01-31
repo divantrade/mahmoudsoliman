@@ -6,12 +6,21 @@
  */
 
 // ============== API Keys & Tokens ==============
+// يقرأ المفتاح من Script Properties أولاً، وإلا من هنا
+function getGeminiApiKey() {
+  try {
+    const key = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+    if (key && key.length > 10) return key;
+  } catch (e) {}
+  return ''; // لا تضع المفتاح هنا - احفظه في Script Properties
+}
+
 const CONFIG = {
   // Telegram Bot Token
   TELEGRAM_BOT_TOKEN: '7746671910:AAGzLPtk6ZbQCcfHGWZpmfd7aeuHz3RyZKo',
 
-  // Gemini AI API Key
-  GEMINI_API_KEY: 'AIzaSyCEJQTo4AjoFfUNmziTOWmUy8H7VoJGHEE',
+  // Gemini AI API Key - يُقرأ من Script Properties
+  get GEMINI_API_KEY() { return getGeminiApiKey(); },
 
   // Telegram API URL
   TELEGRAM_API_URL: 'https://api.telegram.org/bot',
