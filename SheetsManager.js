@@ -315,6 +315,67 @@ function addDefaultContacts() {
 }
 
 /**
+ * ⭐ قراءة التصنيفات من شيت التصنيفات ديناميكياً
+ * @param {string} type - نوع المعاملة (دخل، مصروف، تحويل، عهدة)
+ * @returns {Array} قائمة التصنيفات
+ */
+function getCategoriesFromSheet(type) {
+  try {
+    const sheet = getOrCreateSheet(SHEETS.CATEGORIES);
+    const data = sheet.getDataRange().getValues();
+
+    if (data.length <= 1) {
+      // الشيت فارغ، ارجع للتصنيفات الافتراضية
+      return DEFAULT_CATEGORIES[type] || [];
+    }
+
+    const categories = [];
+    // Headers: الكود، الاسم، النوع، العملة، نشط
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const catType = row[2]; // عمود النوع
+      const isActive = row[4]; // عمود نشط
+
+      if (catType === type && (isActive === 'نعم' || isActive === true || isActive === 'TRUE')) {
+        categories.push({
+          كود: row[0],
+          اسم: row[1],
+          عملة: row[3]
+        });
+      }
+    }
+
+    return categories.length > 0 ? categories : (DEFAULT_CATEGORIES[type] || []);
+  } catch (error) {
+    Logger.log('Error reading categories: ' + error.toString());
+    return DEFAULT_CATEGORIES[type] || [];
+  }
+}
+
+/**
+ * الحصول على كل التصنيفات المتاحة من الشيت
+ * @returns {Object} كل التصنيفات مجمعة بالنوع
+ */
+function getAllCategoriesFromSheet() {
+  return {
+    دخل: getCategoriesFromSheet('دخل'),
+    مصروف: getCategoriesFromSheet('مصروف'),
+    تحويل: getCategoriesFromSheet('تحويل'),
+    عهدة: getCategoriesFromSheet('عهدة')
+  };
+}
+
+/**
+ * الحصول على أكواد التصنيفات كنص للذكاء الاصطناعي
+ * @param {string} type - نوع المعاملة
+ * @returns {string} أكواد التصنيفات مفصولة بفاصلة
+ */
+function getCategoryCodesForAI(type) {
+  const categories = getCategoriesFromSheet(type);
+  return categories.map(c => c.كود).join('، ');
+}
+
+/**
  * Add default settings
  */
 function addDefaultSettings() {
