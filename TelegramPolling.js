@@ -391,32 +391,34 @@ function processCustodyDirectly(chatId, text, user) {
       Logger.log('Exchange rate: ' + exchangeRate + ', Amount received: ' + amountReceived);
     }
 
-    // إنشاء بيانات العهدة
-    const custodyData = {
+    // إنشاء بيانات المعاملة - تُحفظ في شيت الحركات الرئيسي
+    const transData = {
       type: 'إيداع_عهدة',
-      custodian: custodian,
-      amount: amountReceived || amount, // استخدم المبلغ المستلم إن وجد
-      currency: 'جنيه',
-      category: '',
-      beneficiary: '',
-      description: 'عهدة ' + custodian + (exchangeRate ? ' (سعر: ' + exchangeRate + ')' : ''),
+      amount: amount,
+      currency: currency,
+      category: 'عهدة ' + custodian,
+      contact: custodian,
+      contact_name: custodian,
+      description: 'عهدة ' + custodian,
+      amount_received: amountReceived || null,
+      currency_received: amountReceived ? 'جنيه' : null,
+      exchange_rate: exchangeRate || null,
       user_name: user.name,
       telegram_id: user.telegram_id
     };
-    Logger.log('Custody data: ' + JSON.stringify(custodyData));
+    Logger.log('Transaction data: ' + JSON.stringify(transData));
 
-    // حفظ في شيت العهد
-    const result = addCustodyTransaction(custodyData);
+    // حفظ في شيت الحركات الرئيسي
+    const result = addTransaction(transData);
     Logger.log('Result: ' + JSON.stringify(result));
 
     if (result && result.success) {
       let msg = '✅ تم تسجيل عهدة:\n\n';
-      msg += '• إيداع_عهدة: ' + custodyData.amount + ' جنيه لـ ' + custodian + '\n';
-      if (exchangeRate) {
-        msg += '• سعر الصرف: ' + exchangeRate + '\n';
-        msg += '• المبلغ الأصلي: ' + amount + ' ' + currency + '\n';
+      msg += '• إيداع_عهدة: ' + amount + ' ' + currency;
+      if (amountReceived && exchangeRate) {
+        msg += ' ← ' + amountReceived + ' جنيه (سعر: ' + exchangeRate + ')';
       }
-      msg += '\n💼 رصيد العهدة: ' + result.balance + ' جنيه';
+      msg += ' لـ ' + custodian;
       sendMessage(chatId, msg);
     } else {
       sendMessage(chatId, '❌ فشل تسجيل العهدة: ' + (result ? result.message : 'خطأ غير معروف'));
