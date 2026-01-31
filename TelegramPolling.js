@@ -638,3 +638,69 @@ function botStatus() {
 
   return 'Last ID: ' + (lastId || 'none') + ', Pending: ' + pendingCount;
 }
+
+/**
+ * ⭐⭐⭐ حذف الـ Webhook - شغّل هذا أولاً! ⭐⭐⭐
+ * هذا ضروري لأن Webhook يمنع getUpdates من العمل
+ */
+function deleteWebhook() {
+  const url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/deleteWebhook';
+  const response = UrlFetchApp.fetch(url, {
+    method: 'POST',
+    contentType: 'application/json',
+    payload: JSON.stringify({ drop_pending_updates: false }),
+    muteHttpExceptions: true
+  });
+
+  Logger.log('🗑️ Delete Webhook Response: ' + response.getContentText());
+
+  const result = JSON.parse(response.getContentText());
+  if (result.ok) {
+    Logger.log('✅ Webhook deleted successfully!');
+    sendMessage(786700586, '✅ *تم حذف الـ Webhook!*\n\nالآن شغّل `resetBot` ثم أرسل رسالة.');
+    return 'تم حذف الـ Webhook بنجاح!';
+  } else {
+    Logger.log('❌ Failed to delete webhook: ' + result.description);
+    return 'فشل: ' + result.description;
+  }
+}
+
+/**
+ * عرض معلومات الـ Webhook الحالي
+ */
+function getWebhookInfo() {
+  const url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/getWebhookInfo';
+  const response = UrlFetchApp.fetch(url, {
+    method: 'GET',
+    muteHttpExceptions: true
+  });
+
+  Logger.log('📡 Webhook Info: ' + response.getContentText());
+  return response.getContentText();
+}
+
+/**
+ * ⭐ إعداد كامل للبوت (شغّل هذا بعد deleteWebhook)
+ */
+function fullSetup() {
+  Logger.log('🚀 Starting full setup...');
+
+  // 1. حذف الـ Webhook
+  deleteWebhook();
+
+  // 2. انتظر ثانية
+  Utilities.sleep(1000);
+
+  // 3. إعادة تعيين
+  const props = PropertiesService.getScriptProperties();
+  props.deleteProperty(LAST_UPDATE_KEY);
+
+  // 4. إنشاء الـ Trigger
+  createPollingTrigger();
+
+  // 5. إرسال رسالة
+  sendMessage(786700586, '🎉 *تم الإعداد الكامل!*\n\n✅ Webhook محذوف\n✅ Trigger مُفعّل\n\nأرسل أي رسالة للتجربة!');
+
+  Logger.log('✅ Full setup completed!');
+  return 'تم الإعداد الكامل!';
+}
