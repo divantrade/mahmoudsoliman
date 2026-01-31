@@ -5,24 +5,78 @@
  */
 
 /**
+ * ⭐ بناء prompt الذكاء الاصطناعي مع التصنيفات من الشيت
+ */
+function buildAIPrompt() {
+  // قراءة التصنيفات من الشيت ديناميكياً
+  var incomeCategories = getCategoryCodesForAI('دخل') || 'راتب شهري، عمولات، مكافآت، دخل آخر';
+  var expenseCategories = getCategoryCodesForAI('مصروف') || 'أكل وشرب، مواصلات، ملابس، متنوع';
+  var transferCategories = getCategoryCodesForAI('تحويل') || 'مصروفات الزوجة، مساعدة الأهل، متنوع';
+  var custodyCategories = getCategoryCodesForAI('عهدة') || 'قسط جمعية، مساعدة محمد، متنوع';
+
+  Logger.log('Dynamic categories loaded:');
+  Logger.log('Income: ' + incomeCategories);
+  Logger.log('Expense: ' + expenseCategories);
+  Logger.log('Transfer: ' + transferCategories);
+  Logger.log('Custody: ' + custodyCategories);
+
+  // استبدال التصنيفات في الـ prompt
+  var prompt = AI_SYSTEM_PROMPT;
+
+  // استبدال التصنيفات الثابتة بالتصنيفات الديناميكية
+  prompt = prompt.replace(
+    /دخل: راتب شهري.*$/m,
+    'دخل: ' + incomeCategories
+  );
+  prompt = prompt.replace(
+    /مصروف: إيجار السكن.*$/m,
+    'مصروف: ' + expenseCategories
+  );
+  prompt = prompt.replace(
+    /تحويل: مصروفات الزوجة.*$/m,
+    'تحويل: ' + transferCategories
+  );
+  prompt = prompt.replace(
+    /عهدة: قسط جمعية.*$/m,
+    'عهدة: ' + custodyCategories
+  );
+
+  return prompt;
+}
+
+/**
  * Parse user message using Gemini AI
  * @param {string} userMessage - The message from user
  * @param {string} userName - The user's name
  * @returns {Object} Parsed transaction data
  */
 function parseMessageWithGemini(userMessage, userName) {
+  Logger.log('=== parseMessageWithGemini START ===');
+  Logger.log('Message: ' + userMessage);
+  Logger.log('User: ' + userName);
+
   try {
-    const apiKey = CONFIG.GEMINI_API_KEY;
-    const apiUrl = CONFIG.GEMINI_API_URL + '?key=' + apiKey;
+    var apiKey = CONFIG.GEMINI_API_KEY;
 
-    const prompt = `${AI_SYSTEM_PROMPT}
+    // التحقق من وجود مفتاح API
+    if (!apiKey || apiKey.length < 10) {
+      Logger.log('ERROR: Gemini API Key not configured');
+      return {
+        success: false,
+        نجاح: false,
+        message: '❌ مفتاح Gemini API غير مُعد. اتصل بالمسؤول.',
+        رسالة: '❌ مفتاح Gemini API غير مُعد. اتصل بالمسؤول.'
+      };
+    }
 
-الرسالة من المستخدم "${userName}":
-"${userMessage}"
+    var apiUrl = CONFIG.GEMINI_API_URL + '?key=' + apiKey;
 
-حلل هذه الرسالة واستخرج المعاملات المالية منها. أرجع JSON فقط بدون أي نص إضافي.`;
+    // بناء الـ prompt مع التصنيفات الديناميكية
+    var systemPrompt = buildAIPrompt();
 
-    const payload = {
+    var prompt = systemPrompt + '\n\nالرسالة من المستخدم "' + userName + '":\n"' + userMessage + '"\n\nحلل هذه الرسالة واستخرج المعاملات المالية منها. أرجع JSON فقط بدون أي نص إضافي.';
+
+    var payload = {
       contents: [{
         parts: [{
           text: prompt
@@ -36,44 +90,69 @@ function parseMessageWithGemini(userMessage, userName) {
       }
     };
 
-    const options = {
+    var options = {
       method: 'POST',
       contentType: 'application/json',
       payload: JSON.stringify(payload),
       muteHttpExceptions: true
     };
 
-    const response = UrlFetchApp.fetch(apiUrl, options);
-    const responseCode = response.getResponseCode();
+    Logger.log('Calling Gemini API...');
+    var response = UrlFetchApp.fetch(apiUrl, options);
+    var responseCode = response.getResponseCode();
+    Logger.log('Gemini Response Code: ' + responseCode);
 
     if (responseCode !== 200) {
       Logger.log('Gemini API Error: ' + response.getContentText());
       return {
         success: false,
-        message: 'عذراً، حدث خطأ في معالجة الرسالة. حاول مرة أخرى.'
+        نجاح: false,
+        message: '❌ خطأ من Gemini API. حاول مرة أخرى.',
+        رسالة: '❌ خطأ من Gemini API. حاول مرة أخرى.'
       };
     }
 
-    const result = JSON.parse(response.getContentText());
-    const aiResponse = result.candidates[0].content.parts[0].text;
+    var result = JSON.parse(response.getContentText());
 
-    // Extract JSON from response (in case AI adds extra text)
-    const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
+    // التحقق من وجود الـ candidates
+    if (!result.candidates || result.candidates.length === 0) {
+      Logger.log('No candidates in response');
       return {
         success: false,
-        message: 'لم أستطع فهم الرسالة. حاول كتابتها بشكل مختلف.'
+        نجاح: false,
+        message: '❌ لم أستطع معالجة الرسالة. جرب صياغة مختلفة.',
+        رسالة: '❌ لم أستطع معالجة الرسالة. جرب صياغة مختلفة.'
       };
     }
 
-    const parsedData = JSON.parse(jsonMatch[0]);
+    var aiResponse = result.candidates[0].content.parts[0].text;
+    Logger.log('AI Response: ' + aiResponse.substring(0, 500));
+
+    // Extract JSON from response (in case AI adds extra text)
+    var jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      Logger.log('No JSON found in response');
+      return {
+        success: false,
+        نجاح: false,
+        message: '❌ لم أفهم الرسالة. جرب:\n• صرفت 100 غداء\n• حولت لسارة 5000 عهدة',
+        رسالة: '❌ لم أفهم الرسالة. جرب:\n• صرفت 100 غداء\n• حولت لسارة 5000 عهدة'
+      };
+    }
+
+    var parsedData = JSON.parse(jsonMatch[0]);
+    Logger.log('Parsed data: ' + JSON.stringify(parsedData));
+    Logger.log('=== parseMessageWithGemini END ===');
     return parsedData;
 
   } catch (error) {
-    Logger.log('Error in parseMessageWithGemini: ' + error.toString());
+    Logger.log('EXCEPTION in parseMessageWithGemini: ' + error.toString());
+    Logger.log('Stack: ' + (error.stack || 'no stack'));
     return {
       success: false,
-      message: 'حدث خطأ: ' + error.message
+      نجاح: false,
+      message: '❌ حدث خطأ غير متوقع:\n' + error.message + '\n\nجرب مرة أخرى.',
+      رسالة: '❌ حدث خطأ غير متوقع:\n' + error.message + '\n\nجرب مرة أخرى.'
     };
   }
 }
