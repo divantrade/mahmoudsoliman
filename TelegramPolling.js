@@ -421,29 +421,37 @@ function handleMenuButton(chatId, text, user) {
  * إرسال تقرير العهدة
  */
 function sendCustodyReport(chatId, custodian) {
+  Logger.log('=== sendCustodyReport ===');
+  Logger.log('Requesting report for: ' + custodian);
+
   var report = getCustodyReport(custodian);
 
   if (!report) {
-    sendMessage(chatId, '❌ لا توجد بيانات للعهدة');
+    Logger.log('Report returned null!');
+    sendMessage(chatId, '❌ لا توجد بيانات للعهدة\n\nتأكد من تسجيل حركات عهدة أولاً.');
     return;
   }
+
+  Logger.log('Report data: deposits=' + report.total_deposits + ', expenses=' + report.total_expenses + ', transactions=' + (report.transactions ? report.transactions.length : 0));
 
   var msg = '💼 *تقرير عهدة ' + custodian + '*\n';
   msg += '━━━━━━━━━━━━━━━━━━━━━\n\n';
 
-  msg += '📥 *إجمالي الإيداعات:* ' + report.total_deposits.toLocaleString() + ' جنيه\n';
-  msg += '📤 *إجمالي المصروفات:* ' + report.total_expenses.toLocaleString() + ' جنيه\n';
+  msg += '📥 *إجمالي الإيداعات:* ' + formatNumber(report.total_deposits) + ' جنيه\n';
+  msg += '📤 *إجمالي المصروفات:* ' + formatNumber(report.total_expenses) + ' جنيه\n';
   msg += '━━━━━━━━━━━━━━━━━━━━━\n';
-  msg += '💰 *الرصيد الحالي:* ' + report.current_balance.toLocaleString() + ' جنيه\n\n';
+  msg += '💰 *الرصيد الحالي:* ' + formatNumber(report.current_balance) + ' جنيه\n\n';
 
   if (report.transactions && report.transactions.length > 0) {
-    msg += '*📋 آخر الحركات:*\n';
+    msg += '*📋 آخر الحركات (' + report.transactions.length + '):*\n';
     var lastTrans = report.transactions.slice(-5).reverse();
     for (var i = 0; i < lastTrans.length; i++) {
       var t = lastTrans[i];
       var icon = t.type === 'إيداع_عهدة' ? '📥' : '📤';
-      msg += icon + ' ' + t.amount + ' - ' + (t.category || t.type) + '\n';
+      msg += icon + ' ' + formatNumber(t.amount) + ' - ' + (t.category || t.type) + '\n';
     }
+  } else {
+    msg += '📋 _لا توجد حركات مسجلة بعد_\n';
   }
 
   sendMessage(chatId, msg);

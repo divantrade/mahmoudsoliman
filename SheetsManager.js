@@ -749,7 +749,8 @@ function addCustodyTransaction(custodyData) {
 }
 
 /**
- * الحصول على رصيد العهدة لأمين معين
+ * الحصول على رصيد العهدة لأمين معين (من شيت العهد القديم)
+ * ⚠️ يُفضل استخدام calculateCustodyBalanceFromTransactions بدلاً منها
  * @param {string} custodian - اسم أمين العهدة
  * @returns {number} الرصيد الحالي
  */
@@ -759,27 +760,66 @@ function getCustodyBalance(custodian) {
     const data = sheet.getDataRange().getValues();
 
     let balance = 0;
-    const custodianLower = (custodian || 'سارة').toLowerCase();
+    const custodianName = custodian || 'سارة';
+
+    Logger.log('=== getCustodyBalance (from CUSTODY sheet) ===');
+    Logger.log('Looking for: ' + custodianName);
 
     for (let i = 1; i < data.length; i++) {
-      if (data[i][4] && data[i][4].toString().toLowerCase() === custodianLower) {
-        const type = data[i][3];
-        const amount = parseFloat(data[i][5]) || 0;
+      const rowCustodian = data[i][4] || '';
 
-        if (type === 'إيداع_عهدة') {
-          balance += amount;
-        } else if (type === 'صرف_من_عهدة') {
-          balance -= amount;
-        }
+      // استخدام دالة المقارنة المحسنة
+      if (!isCustodianMatch(rowCustodian, custodianName)) {
+        continue;
+      }
+
+      const type = data[i][3];
+      const amount = parseFloat(data[i][5]) || 0;
+
+      if (type === 'إيداع_عهدة') {
+        balance += amount;
+        Logger.log('Row ' + i + ': +' + amount);
+      } else if (type === 'صرف_من_عهدة') {
+        balance -= amount;
+        Logger.log('Row ' + i + ': -' + amount);
       }
     }
 
+    Logger.log('Balance from CUSTODY sheet: ' + balance);
     return balance;
 
   } catch (error) {
     Logger.log('Error getting custody balance: ' + error.toString());
     return 0;
   }
+}
+
+/**
+ * ⭐ دالة تطبيع النص العربي للمقارنة
+ * تزيل المسافات وتوحد الأحرف المتشابهة
+ */
+function normalizeArabicText(text) {
+  if (!text) return '';
+  var normalized = text.toString().trim().toLowerCase();
+  // توحيد الأحرف العربية المتشابهة
+  normalized = normalized.replace(/[ةه]/g, 'ه');
+  normalized = normalized.replace(/[يى]/g, 'ي');
+  normalized = normalized.replace(/[أإآا]/g, 'ا');
+  normalized = normalized.replace(/\s+/g, ''); // إزالة المسافات
+  return normalized;
+}
+
+/**
+ * ⭐ التحقق من تطابق اسم أمين العهدة
+ */
+function isCustodianMatch(contact, custodian) {
+  var contactNorm = normalizeArabicText(contact);
+  var custodianNorm = normalizeArabicText(custodian);
+
+  // تحقق من التطابق المباشر أو احتواء الاسم
+  return contactNorm === custodianNorm ||
+         contactNorm.indexOf(custodianNorm) !== -1 ||
+         custodianNorm.indexOf(contactNorm) !== -1;
 }
 
 /**
@@ -793,30 +833,51 @@ function calculateCustodyBalanceFromTransactions(custodian) {
     var data = sheet.getDataRange().getValues();
 
     var balance = 0;
-    var custodianLower = (custodian || 'سارة').toLowerCase();
+    var matchedCount = 0;
+    var custodianName = custodian || 'سارة';
+
+    Logger.log('=== calculateCustodyBalanceFromTransactions ===');
+    Logger.log('Looking for custodian: ' + custodianName);
+    Logger.log('Total rows in sheet: ' + data.length);
 
     // Headers: ID, التاريخ, الوقت, النوع, التصنيف, المبلغ, العملة, المبلغ_المستلم, عملة_الاستلام, سعر_الصرف, جهة_الاتصال, ...
     for (var i = 1; i < data.length; i++) {
       var type = data[i][3]; // النوع
-      var contact = (data[i][10] || '').toString().toLowerCase(); // جهة_الاتصال
+      var contact = data[i][10] || ''; // جهة_الاتصال
+      var category = data[i][4] || ''; // التصنيف
 
       // التحقق من أن الحركة لأمين العهدة المحدد
-      if (contact.indexOf(custodianLower) === -1) {
+      // نبحث في جهة الاتصال والتصنيف معاً
+      var isMatch = isCustodianMatch(contact, custodianName) ||
+                    isCustodianMatch(category, custodianName);
+
+      if (!isMatch) {
         continue;
       }
+
+      // فقط حركات العهدة
+      if (type !== 'إيداع_عهدة' && type !== 'صرف_من_عهدة') {
+        continue;
+      }
+
+      matchedCount++;
 
       if (type === 'إيداع_عهدة') {
         // المبلغ المستلم (بالجنيه) أو المبلغ الأصلي
         var amountReceived = parseFloat(data[i][7]) || 0;
         var amount = parseFloat(data[i][5]) || 0;
-        balance += amountReceived > 0 ? amountReceived : amount;
+        var addAmount = amountReceived > 0 ? amountReceived : amount;
+        balance += addAmount;
+        Logger.log('Row ' + i + ': إيداع +' + addAmount + ' (contact: ' + contact + ')');
       } else if (type === 'صرف_من_عهدة') {
         var amount = parseFloat(data[i][5]) || 0;
         balance -= amount;
+        Logger.log('Row ' + i + ': صرف -' + amount + ' (contact: ' + contact + ')');
       }
     }
 
-    Logger.log('Custody balance for ' + custodian + ': ' + balance);
+    Logger.log('Matched ' + matchedCount + ' transactions for ' + custodianName);
+    Logger.log('Final balance for ' + custodianName + ': ' + balance);
     return balance;
 
   } catch (error) {
@@ -836,19 +897,28 @@ function getCustodyReport(custodian) {
     var sheet = getOrCreateSheet(SHEETS.TRANSACTIONS);
     var data = sheet.getDataRange().getValues();
 
-    var custodianLower = (custodian || 'سارة').toLowerCase();
+    var custodianName = custodian || 'سارة';
 
     var totalDeposits = 0;
     var totalExpenses = 0;
     var transactions = [];
 
+    Logger.log('=== getCustodyReport ===');
+    Logger.log('Looking for custodian: ' + custodianName);
+    Logger.log('Total rows in sheet: ' + data.length);
+
     // Headers: ID, التاريخ, الوقت, النوع, التصنيف, المبلغ, العملة, المبلغ_المستلم, عملة_الاستلام, سعر_الصرف, جهة_الاتصال, الوصف, ...
     for (var i = 1; i < data.length; i++) {
       var type = data[i][3];
-      var contact = (data[i][10] || '').toString().toLowerCase();
+      var contact = data[i][10] || '';
+      var category = data[i][4] || '';
 
       // التحقق من أن الحركة لأمين العهدة المحدد
-      if (contact.indexOf(custodianLower) === -1) {
+      // نبحث في جهة الاتصال والتصنيف معاً
+      var isMatch = isCustodianMatch(contact, custodianName) ||
+                    isCustodianMatch(category, custodianName);
+
+      if (!isMatch) {
         continue;
       }
 
@@ -864,8 +934,10 @@ function getCustodyReport(custodian) {
         // للإيداع: نستخدم المبلغ المستلم (بالجنيه) إن وجد
         var depositAmount = amountReceived > 0 ? amountReceived : amount;
         totalDeposits += depositAmount;
+        Logger.log('Row ' + i + ': Found deposit +' + depositAmount + ' (contact: ' + contact + ', category: ' + category + ')');
       } else if (type === 'صرف_من_عهدة') {
         totalExpenses += amount;
+        Logger.log('Row ' + i + ': Found expense -' + amount + ' (contact: ' + contact + ', category: ' + category + ')');
       }
 
       transactions.push({
@@ -878,6 +950,10 @@ function getCustodyReport(custodian) {
         exchange_rate: data[i][9]
       });
     }
+
+    Logger.log('Found ' + transactions.length + ' transactions for ' + custodianName);
+    Logger.log('Total deposits: ' + totalDeposits + ', Total expenses: ' + totalExpenses);
+    Logger.log('Balance: ' + (totalDeposits - totalExpenses));
 
     return {
       custodian: custodian,
