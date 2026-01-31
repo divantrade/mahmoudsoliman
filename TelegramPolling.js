@@ -166,6 +166,11 @@ function handleMessage(message) {
     return;
   }
 
+  // معالجة أزرار القائمة الدائمة
+  if (handleMenuButton(chatId, text, user)) {
+    return;
+  }
+
   // معالجة بالذكاء الاصطناعي
   processUserMessage(chatId, text, user);
 }
@@ -230,6 +235,37 @@ function handleCommand(chatId, text, user) {
 
     default:
       sendMessage(chatId, '❓ أمر غير معروف.\n\n/help للمساعدة');
+  }
+}
+
+/**
+ * معالجة أزرار القائمة الدائمة
+ */
+function handleMenuButton(chatId, text, user) {
+  switch (text) {
+    case '📊 التقارير':
+      sendReportMenu(chatId);
+      return true;
+    case '💰 الرصيد':
+      sendBalanceSummary(chatId);
+      return true;
+    case '📅 تقرير شهري':
+      sendMessage(chatId, generateMonthlySummary());
+      return true;
+    case '💕 تقرير الزوجة':
+      sendMessage(chatId, generateWifeReport());
+      return true;
+    case '👨‍👩‍👧‍👦 الإخوة':
+      sendMessage(chatId, generateSiblingsReport());
+      return true;
+    case '💍 الذهب':
+      sendMessage(chatId, generateGoldReport());
+      return true;
+    case '❓ المساعدة':
+      sendHelpMessage(chatId, user);
+      return true;
+    default:
+      return false; // ليس زر قائمة
   }
 }
 
@@ -305,19 +341,19 @@ function sendWelcomeMessage(chatId, user) {
     '📊 /report - التقارير\n' +
     '❓ /help - المساعدة';
 
-  const keyboard = {
-    inline_keyboard: [
-      [
-        { text: '📊 التقارير', callback_data: 'menu_reports' },
-        { text: '💰 الرصيد', callback_data: 'cmd_balance' }
-      ],
-      [
-        { text: '❓ المساعدة', callback_data: 'cmd_help' }
-      ]
-    ]
+  // القائمة الدائمة (Reply Keyboard)
+  const replyKeyboard = {
+    keyboard: [
+      ['📊 التقارير', '💰 الرصيد'],
+      ['📅 تقرير شهري', '💕 تقرير الزوجة'],
+      ['👨‍👩‍👧‍👦 الإخوة', '💍 الذهب'],
+      ['❓ المساعدة']
+    ],
+    resize_keyboard: true,
+    persistent: true
   };
 
-  sendMessage(chatId, msg, keyboard);
+  sendMessage(chatId, msg, replyKeyboard);
 }
 
 /**
@@ -698,9 +734,59 @@ function fullSetup() {
   // 4. إنشاء الـ Trigger
   createPollingTrigger();
 
-  // 5. إرسال رسالة
-  sendMessage(786700586, '🎉 *تم الإعداد الكامل!*\n\n✅ Webhook محذوف\n✅ Trigger مُفعّل\n\nأرسل أي رسالة للتجربة!');
+  // 5. فحص مفتاح Gemini
+  const apiKey = CONFIG.GEMINI_API_KEY;
+  const geminiStatus = (apiKey && apiKey.length > 10) ? '✅' : '❌';
+
+  // 6. إرسال رسالة
+  sendMessage(786700586, '🎉 *تم الإعداد الكامل!*\n\n✅ Webhook محذوف\n✅ Trigger مُفعّل\n' + geminiStatus + ' Gemini API Key\n\nأرسل /start لظهور القائمة!');
 
   Logger.log('✅ Full setup completed!');
   return 'تم الإعداد الكامل!';
+}
+
+/**
+ * ⭐ فحص مفتاح Gemini API
+ */
+function testGeminiKey() {
+  const apiKey = CONFIG.GEMINI_API_KEY;
+
+  if (!apiKey || apiKey.length < 10) {
+    Logger.log('❌ Gemini API Key غير موجود في Script Properties!');
+    Logger.log('اذهب إلى Project Settings → Script Properties → أضف GEMINI_API_KEY');
+    return 'مفتاح Gemini غير موجود!';
+  }
+
+  Logger.log('🔑 Found API Key: ' + apiKey.substring(0, 10) + '...');
+
+  // اختبار بسيط
+  try {
+    const apiUrl = CONFIG.GEMINI_API_URL + '?key=' + apiKey;
+    const payload = {
+      contents: [{ parts: [{ text: 'قل مرحبا' }] }],
+      generationConfig: { maxOutputTokens: 50 }
+    };
+
+    const response = UrlFetchApp.fetch(apiUrl, {
+      method: 'POST',
+      contentType: 'application/json',
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+
+    const code = response.getResponseCode();
+    Logger.log('Response Code: ' + code);
+
+    if (code === 200) {
+      Logger.log('✅ Gemini API يعمل!');
+      sendMessage(786700586, '✅ *Gemini API يعمل!*\n\nالبوت جاهز لمعالجة الرسائل.');
+      return 'Gemini يعمل!';
+    } else {
+      Logger.log('❌ Gemini Error: ' + response.getContentText());
+      return 'خطأ: ' + response.getContentText();
+    }
+  } catch (e) {
+    Logger.log('❌ Exception: ' + e.toString());
+    return 'خطأ: ' + e.toString();
+  }
 }
