@@ -49,6 +49,20 @@ function removePendingTransaction(chatId) {
 }
 
 /**
+ * ⭐ Escape رموز Markdown الخاصة
+ * يمنع كسر التنسيق عند وجود _ أو * في النص
+ */
+function escapeMarkdown(text) {
+  if (!text) return '';
+  return text.toString()
+    .replace(/_/g, '\\_')
+    .replace(/\*/g, '\\*')
+    .replace(/\[/g, '\\[')
+    .replace(/\]/g, '\\]')
+    .replace(/`/g, '\\`');
+}
+
+/**
  * ⭐ إنشاء نموذج المراجعة
  */
 function buildPreviewMessage(transactions) {
@@ -58,7 +72,10 @@ function buildPreviewMessage(transactions) {
   for (var i = 0; i < transactions.length; i++) {
     var t = transactions[i];
     msg += '🔹 *المعاملة ' + (i + 1) + ':*\n';
-    msg += '   النوع: ' + (t.type || '-') + '\n';
+
+    // استخدام escapeMarkdown لمنع كسر التنسيق
+    var typeDisplay = (t.type || '-').replace(/_/g, ' '); // تحويل إيداع_عهدة إلى إيداع عهدة
+    msg += '   النوع: ' + typeDisplay + '\n';
     msg += '   المبلغ: ' + (t.amount || 0) + ' ' + (t.currency || 'ريال') + '\n';
 
     if (t.amount_received) {
@@ -68,13 +85,13 @@ function buildPreviewMessage(transactions) {
       msg += '   سعر الصرف: ' + t.exchange_rate + '\n';
     }
     if (t.category) {
-      msg += '   التصنيف: ' + t.category + '\n';
+      msg += '   التصنيف: ' + escapeMarkdown(t.category) + '\n';
     }
     if (t.contact) {
-      msg += '   الجهة: ' + t.contact + '\n';
+      msg += '   الجهة: ' + escapeMarkdown(t.contact) + '\n';
     }
     if (t.description) {
-      msg += '   الوصف: ' + t.description + '\n';
+      msg += '   الوصف: ' + escapeMarkdown(t.description) + '\n';
     }
     msg += '\n';
   }
