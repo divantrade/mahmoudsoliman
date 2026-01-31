@@ -187,7 +187,7 @@ function addCategoriesDropdowns() {
 
   // عمود النوع (3)
   const typeRule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(['دخل', 'مصروف', 'تحويل'], true)
+    .requireValueInList(['دخل', 'مصروف', 'تحويل', 'عهدة'], true)
     .setAllowInvalid(false)
     .build();
   sheet.getRange(2, 3, lastRow, 1).setDataValidation(typeRule);
