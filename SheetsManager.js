@@ -93,6 +93,15 @@ function getSheetHeaders(sheetName) {
     ],
     'الإعدادات': [
       'المفتاح', 'القيمة', 'الوصف'
+    ],
+    // تقارير العهدة - لسارة ومصطفى
+    'تقرير_عهدة_سارة': [
+      'التاريخ', 'الوقت', 'النوع', 'المبلغ', 'العملة', 'التصنيف',
+      'الوصف', 'سعر_الصرف', 'الرصيد_المتبقي'
+    ],
+    'تقرير_عهدة_مصطفى': [
+      'التاريخ', 'الوقت', 'النوع', 'المبلغ', 'العملة', 'التصنيف',
+      'الوصف', 'سعر_الصرف', 'الرصيد_المتبقي'
     ]
   };
 
@@ -965,6 +974,258 @@ function getCustodyReport(custodian) {
 
   } catch (error) {
     Logger.log('Error getting custody report: ' + error.toString());
+    return null;
+  }
+}
+
+// =====================================================
+// تقارير العهدة المحفوظة (شيتات منفصلة)
+// =====================================================
+
+/**
+ * ⭐ تحديث شيت تقرير العهدة لأمين معين
+ * يقرأ من شيت الحركات ويكتب في شيت التقرير
+ * @param {string} custodian - اسم أمين العهدة (سارة أو مصطفى)
+ * @returns {Object} نتيجة التحديث
+ */
+function updateCustodyReportSheet(custodian) {
+  try {
+    var custodianName = custodian || 'سارة';
+    var sheetName = '';
+
+    // تحديد اسم الشيت بناءً على أمين العهدة
+    if (isCustodianMatch(custodianName, 'سارة')) {
+      sheetName = SHEETS.CUSTODY_REPORT_SARA;
+      custodianName = 'سارة';
+    } else if (isCustodianMatch(custodianName, 'مصطفى')) {
+      sheetName = SHEETS.CUSTODY_REPORT_MOSTAFA;
+      custodianName = 'مصطفى';
+    } else {
+      return { success: false, message: 'أمين العهدة غير معروف: ' + custodian };
+    }
+
+    Logger.log('=== updateCustodyReportSheet ===');
+    Logger.log('Custodian: ' + custodianName);
+    Logger.log('Sheet name: ' + sheetName);
+
+    // قراءة الحركات من شيت الحركات الرئيسي
+    var transactionsSheet = getOrCreateSheet(SHEETS.TRANSACTIONS);
+    var data = transactionsSheet.getDataRange().getValues();
+
+    // تجميع حركات العهدة لهذا الأمين
+    var custodyTransactions = [];
+    var runningBalance = 0;
+
+    // Headers: ID, التاريخ, الوقت, النوع, التصنيف, المبلغ, العملة, المبلغ_المستلم, عملة_الاستلام, سعر_الصرف, جهة_الاتصال, الوصف, ...
+    for (var i = 1; i < data.length; i++) {
+      var type = data[i][3];
+      var contact = data[i][10] || '';
+      var category = data[i][4] || '';
+
+      // التحقق من أن الحركة لأمين العهدة المحدد
+      var isMatch = isCustodianMatch(contact, custodianName) ||
+                    isCustodianMatch(category, custodianName);
+
+      if (!isMatch) continue;
+
+      // فقط حركات العهدة
+      if (type !== 'إيداع_عهدة' && type !== 'صرف_من_عهدة') continue;
+
+      var amount = parseFloat(data[i][5]) || 0;
+      var amountReceived = parseFloat(data[i][7]) || 0;
+      var effectiveAmount = amountReceived > 0 ? amountReceived : amount;
+
+      // حساب الرصيد المتراكم
+      if (type === 'إيداع_عهدة') {
+        runningBalance += effectiveAmount;
+      } else if (type === 'صرف_من_عهدة') {
+        runningBalance -= amount;
+        effectiveAmount = amount; // للصرف نستخدم المبلغ المباشر
+      }
+
+      // تنسيق النوع للعرض
+      var displayType = type === 'إيداع_عهدة' ? 'إيداع' : 'صرف';
+
+      custodyTransactions.push([
+        data[i][1],  // التاريخ
+        data[i][2],  // الوقت
+        displayType, // النوع
+        effectiveAmount, // المبلغ
+        data[i][6] || 'جنيه', // العملة
+        data[i][4] || '', // التصنيف
+        data[i][11] || '', // الوصف
+        data[i][9] || '', // سعر_الصرف
+        runningBalance // الرصيد المتبقي
+      ]);
+    }
+
+    Logger.log('Found ' + custodyTransactions.length + ' transactions for ' + custodianName);
+
+    // الحصول على شيت التقرير أو إنشاؤه
+    var reportSheet = getOrCreateSheet(sheetName);
+
+    // مسح البيانات القديمة (ما عدا الهيدر)
+    var lastRow = reportSheet.getLastRow();
+    if (lastRow > 1) {
+      reportSheet.getRange(2, 1, lastRow - 1, 9).clearContent();
+    }
+
+    // كتابة البيانات الجديدة
+    if (custodyTransactions.length > 0) {
+      reportSheet.getRange(2, 1, custodyTransactions.length, 9).setValues(custodyTransactions);
+
+      // تنسيق الأرقام
+      reportSheet.getRange(2, 4, custodyTransactions.length, 1).setNumberFormat('#,##0');
+      reportSheet.getRange(2, 9, custodyTransactions.length, 1).setNumberFormat('#,##0');
+
+      // تلوين الإيداعات والمصروفات
+      for (var j = 0; j < custodyTransactions.length; j++) {
+        var rowNum = j + 2;
+        if (custodyTransactions[j][2] === 'إيداع') {
+          reportSheet.getRange(rowNum, 3).setFontColor('#0b8043'); // أخضر
+          reportSheet.getRange(rowNum, 4).setFontColor('#0b8043');
+        } else {
+          reportSheet.getRange(rowNum, 3).setFontColor('#c53929'); // أحمر
+          reportSheet.getRange(rowNum, 4).setFontColor('#c53929');
+        }
+      }
+    }
+
+    // إضافة صف الملخص في النهاية
+    var summaryRow = custodyTransactions.length + 3;
+    var totalDeposits = 0;
+    var totalExpenses = 0;
+
+    custodyTransactions.forEach(function(t) {
+      if (t[2] === 'إيداع') {
+        totalDeposits += t[3];
+      } else {
+        totalExpenses += t[3];
+      }
+    });
+
+    // كتابة الملخص
+    reportSheet.getRange(summaryRow, 1).setValue('═══ ملخص العهدة ═══');
+    reportSheet.getRange(summaryRow, 1, 1, 3).merge();
+    reportSheet.getRange(summaryRow, 1).setFontWeight('bold').setBackground('#f3f3f3');
+
+    reportSheet.getRange(summaryRow + 1, 1).setValue('إجمالي الإيداعات:');
+    reportSheet.getRange(summaryRow + 1, 2).setValue(totalDeposits).setNumberFormat('#,##0').setFontColor('#0b8043');
+
+    reportSheet.getRange(summaryRow + 2, 1).setValue('إجمالي المصروفات:');
+    reportSheet.getRange(summaryRow + 2, 2).setValue(totalExpenses).setNumberFormat('#,##0').setFontColor('#c53929');
+
+    reportSheet.getRange(summaryRow + 3, 1).setValue('الرصيد الحالي:');
+    reportSheet.getRange(summaryRow + 3, 2).setValue(runningBalance).setNumberFormat('#,##0').setFontWeight('bold');
+
+    reportSheet.getRange(summaryRow + 4, 1).setValue('آخر تحديث:');
+    reportSheet.getRange(summaryRow + 4, 2).setValue(new Date()).setNumberFormat('yyyy-MM-dd HH:mm');
+
+    Logger.log('Report updated successfully for ' + custodianName);
+    Logger.log('Final balance: ' + runningBalance);
+
+    return {
+      success: true,
+      message: 'تم تحديث تقرير عهدة ' + custodianName,
+      transactions_count: custodyTransactions.length,
+      balance: runningBalance,
+      total_deposits: totalDeposits,
+      total_expenses: totalExpenses
+    };
+
+  } catch (error) {
+    Logger.log('Error updating custody report sheet: ' + error.toString());
+    return { success: false, message: error.toString() };
+  }
+}
+
+/**
+ * ⭐ تحديث جميع تقارير العهدة (سارة ومصطفى)
+ * @returns {Object} نتيجة التحديث
+ */
+function updateAllCustodyReports() {
+  try {
+    Logger.log('=== Updating all custody reports ===');
+
+    var saraResult = updateCustodyReportSheet('سارة');
+    var mostafaResult = updateCustodyReportSheet('مصطفى');
+
+    return {
+      success: true,
+      message: 'تم تحديث جميع تقارير العهدة',
+      sara: saraResult,
+      mostafa: mostafaResult
+    };
+
+  } catch (error) {
+    Logger.log('Error updating all custody reports: ' + error.toString());
+    return { success: false, message: error.toString() };
+  }
+}
+
+/**
+ * ⭐ الحصول على ملخص تقرير العهدة من الشيت
+ * @param {string} custodian - اسم أمين العهدة
+ * @returns {Object} ملخص التقرير
+ */
+function getCustodyReportSummary(custodian) {
+  try {
+    var custodianName = custodian || 'سارة';
+    var sheetName = '';
+
+    if (isCustodianMatch(custodianName, 'سارة')) {
+      sheetName = SHEETS.CUSTODY_REPORT_SARA;
+      custodianName = 'سارة';
+    } else if (isCustodianMatch(custodianName, 'مصطفى')) {
+      sheetName = SHEETS.CUSTODY_REPORT_MOSTAFA;
+      custodianName = 'مصطفى';
+    } else {
+      return null;
+    }
+
+    var ss = getSpreadsheet();
+    var sheet = ss.getSheetByName(sheetName);
+
+    if (!sheet) {
+      // الشيت غير موجود، إنشاؤه وتحديثه
+      updateCustodyReportSheet(custodianName);
+      sheet = ss.getSheetByName(sheetName);
+    }
+
+    // قراءة البيانات وحساب الملخص
+    var data = sheet.getDataRange().getValues();
+    var transactionsCount = 0;
+    var totalDeposits = 0;
+    var totalExpenses = 0;
+    var lastBalance = 0;
+
+    for (var i = 1; i < data.length; i++) {
+      if (data[i][0] === '═══ ملخص العهدة ═══') break;
+      if (!data[i][0]) continue;
+
+      transactionsCount++;
+      var type = data[i][2];
+      var amount = parseFloat(data[i][3]) || 0;
+
+      if (type === 'إيداع') {
+        totalDeposits += amount;
+      } else if (type === 'صرف') {
+        totalExpenses += amount;
+      }
+
+      lastBalance = parseFloat(data[i][8]) || 0;
+    }
+
+    return {
+      custodian: custodianName,
+      transactions_count: transactionsCount,
+      total_deposits: totalDeposits,
+      total_expenses: totalExpenses,
+      current_balance: lastBalance
+    };
+
+  } catch (error) {
+    Logger.log('Error getting custody report summary: ' + error.toString());
     return null;
   }
 }
