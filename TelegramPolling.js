@@ -338,32 +338,25 @@ function sendCustodyReport(chatId, custodian) {
 
 /**
  * ⭐⭐⭐ معالجة العهدة مباشرة - بدون Gemini ⭐⭐⭐
- * تستخرج المبلغ والجهة من النص مباشرة
+ * تستخرج المبلغ والجهة وسعر الصرف من النص مباشرة
+ * يدعم: "حولت لسارة 500 ريال ما يعادل 6000 جنيه عهدة"
  */
 function processCustodyDirectly(chatId, text, user) {
-  Logger.log('*** processCustodyDirectly called ***');
+  Logger.log('=== processCustodyDirectly START ===');
   Logger.log('Text: ' + text);
+  Logger.log('User: ' + JSON.stringify(user));
 
   try {
-    // استخراج المبلغ (أرقام عربية وإنجليزية)
+    // تحويل الأرقام العربية إلى إنجليزية
     const arabicNums = {'٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9'};
     let normalizedText = text;
-    for (let ar in arabicNums) {
+    for (var ar in arabicNums) {
       normalizedText = normalizedText.replace(new RegExp(ar, 'g'), arabicNums[ar]);
     }
-
-    // البحث عن الأرقام
-    const amountMatch = normalizedText.match(/(\d+)/);
-    if (!amountMatch) {
-      sendMessage(chatId, '❌ لم أجد مبلغ في الرسالة.\n\nجرب: حولت لسارة 5000 عهدة');
-      return;
-    }
-
-    const amount = parseInt(amountMatch[1]);
-    Logger.log('Amount found: ' + amount);
+    Logger.log('Normalized text: ' + normalizedText);
 
     // تحديد أمين العهدة (سارة أو مصطفى)
-    let custodian = 'سارة'; // افتراضي
+    var custodian = 'سارة'; // افتراضي
     if (/مصطف[يى]/i.test(text)) {
       custodian = 'مصطفى';
     } else if (/سار[ةه]/i.test(text)) {
@@ -371,63 +364,107 @@ function processCustodyDirectly(chatId, text, user) {
     }
     Logger.log('Custodian: ' + custodian);
 
-    // تحديد العملة
-    let currency = 'جنيه'; // العهدة عادة بالجنيه
-    if (/ريال/i.test(text)) {
-      currency = 'ريال';
-    }
+    // استخراج المبالغ والعملات
+    var amount = 0;
+    var currency = 'جنيه';
+    var amountReceived = null;
+    var currencyReceived = 'جنيه';
+    var exchangeRate = null;
 
-    // استخراج سعر الصرف والمبلغ المستلم إن وجد
-    let exchangeRate = null;
-    let amountReceived = null;
+    // نمط 1: "X ريال ما يعادل Y جنيه" أو "X ريال يعادل Y"
+    var exchangePattern = /(\d+)\s*(?:ريال|سعودي)\s*(?:ما\s*)?يعادل\s*(\d+)/i;
+    var exchangeMatch = normalizedText.match(exchangePattern);
 
-    // البحث عن نمط "ما يعادل X" أو "يعادل X"
-    const exchangeMatch = normalizedText.match(/(?:ما\s*)?يعادل\s*(\d+)/i);
     if (exchangeMatch) {
-      amountReceived = parseInt(exchangeMatch[1]);
+      amount = parseInt(exchangeMatch[1]);
+      amountReceived = parseInt(exchangeMatch[2]);
+      currency = 'ريال';
+      currencyReceived = 'جنيه';
       if (amount > 0 && amountReceived > 0) {
         exchangeRate = (amountReceived / amount).toFixed(2);
       }
-      Logger.log('Exchange rate: ' + exchangeRate + ', Amount received: ' + amountReceived);
+      Logger.log('Pattern 1 matched - Amount: ' + amount + ' SAR = ' + amountReceived + ' EGP, Rate: ' + exchangeRate);
+    } else {
+      // نمط 2: "X جنيه" أو "X ريال" (بدون سعر صرف)
+      var amounts = normalizedText.match(/(\d+)/g);
+      if (amounts && amounts.length > 0) {
+        amount = parseInt(amounts[0]);
+
+        // تحديد العملة من السياق
+        if (/ريال|سعودي/i.test(text)) {
+          currency = 'ريال';
+        } else if (/جنيه|مصري/i.test(text)) {
+          currency = 'جنيه';
+        } else {
+          currency = 'جنيه'; // العهدة افتراضياً بالجنيه
+        }
+
+        // لو في رقم تاني بعد "يعادل" أو "وصل" أو "وصلوا"
+        var secondAmountMatch = normalizedText.match(/(?:يعادل|وصل|وصلوا|وصلت)\s*(\d+)/i);
+        if (secondAmountMatch) {
+          amountReceived = parseInt(secondAmountMatch[1]);
+          currencyReceived = 'جنيه';
+          if (amount > 0 && amountReceived > 0) {
+            exchangeRate = (amountReceived / amount).toFixed(2);
+          }
+        }
+      }
+      Logger.log('Pattern 2 - Amount: ' + amount + ' ' + currency);
+    }
+
+    // التحقق من وجود مبلغ
+    if (!amount || amount <= 0) {
+      Logger.log('ERROR: No amount found');
+      sendMessage(chatId, '❌ لم أجد مبلغ في الرسالة.\n\nجرب:\n• حولت لسارة 5000 عهدة\n• حولت لسارة 500 ريال ما يعادل 6000 جنيه عهدة');
+      return;
     }
 
     // إنشاء بيانات المعاملة - تُحفظ في شيت الحركات الرئيسي
-    const transData = {
+    var transData = {
       type: 'إيداع_عهدة',
       amount: amount,
       currency: currency,
       category: 'عهدة ' + custodian,
       contact: custodian,
       contact_name: custodian,
-      description: 'عهدة ' + custodian,
-      amount_received: amountReceived || null,
-      currency_received: amountReceived ? 'جنيه' : null,
-      exchange_rate: exchangeRate || null,
+      description: 'إيداع عهدة لـ ' + custodian,
+      amount_received: amountReceived,
+      currency_received: amountReceived ? currencyReceived : '',
+      exchange_rate: exchangeRate,
       user_name: user.name,
       telegram_id: user.telegram_id
     };
     Logger.log('Transaction data: ' + JSON.stringify(transData));
 
     // حفظ في شيت الحركات الرئيسي
-    const result = addTransaction(transData);
-    Logger.log('Result: ' + JSON.stringify(result));
+    var result = addTransaction(transData);
+    Logger.log('addTransaction result: ' + JSON.stringify(result));
 
     if (result && result.success) {
-      let msg = '✅ تم تسجيل عهدة:\n\n';
-      msg += '• إيداع_عهدة: ' + amount + ' ' + currency;
+      var msg = '✅ تم تسجيل عهدة ' + custodian + ':\n\n';
+      msg += '💰 المبلغ: ' + amount + ' ' + currency;
       if (amountReceived && exchangeRate) {
-        msg += ' ← ' + amountReceived + ' جنيه (سعر: ' + exchangeRate + ')';
+        msg += '\n📥 المستلم: ' + amountReceived + ' ' + currencyReceived;
+        msg += '\n💱 سعر الصرف: ' + exchangeRate;
       }
-      msg += ' لـ ' + custodian;
+      msg += '\n\n📋 تم الحفظ في شيت الحركات';
       sendMessage(chatId, msg);
     } else {
-      sendMessage(chatId, '❌ فشل تسجيل العهدة: ' + (result ? result.message : 'خطأ غير معروف'));
+      var errorMsg = '❌ فشل تسجيل العهدة';
+      if (result && result.message) {
+        errorMsg += ':\n' + result.message;
+      }
+      Logger.log('ERROR: ' + errorMsg);
+      sendMessage(chatId, errorMsg);
     }
 
   } catch (error) {
-    Logger.log('Error in processCustodyDirectly: ' + error.toString());
-    sendMessage(chatId, '❌ خطأ في معالجة العهدة: ' + error.message);
+    Logger.log('EXCEPTION in processCustodyDirectly: ' + error.toString());
+    Logger.log('Stack: ' + (error.stack || 'no stack'));
+    sendMessage(chatId, '❌ خطأ في معالجة العهدة:\n' + error.message + '\n\nجرب كتابة الرسالة بشكل أبسط.');
   }
+
+  Logger.log('=== processCustodyDirectly END ===');
 }
 
 /**
@@ -513,57 +550,33 @@ function processUserMessage(chatId, text, user) {
         let result;
         let detail = '';
 
-        // التحقق من نوع المعاملة (عهدة أو عادية)
+        // ⭐⭐⭐ جميع المعاملات تُحفظ في شيت الحركات الرئيسي ⭐⭐⭐
         Logger.log('Processing transaction type: ' + transData.type);
+        Logger.log('Full transData: ' + JSON.stringify(transData));
 
-        if (transData.type === 'إيداع_عهدة' || transData.type === 'صرف_من_عهدة') {
-          // حركة عهدة
-          Logger.log('*** CUSTODY TRANSACTION DETECTED ***');
-          const custodyData = {
-            type: transData.type,
-            custodian: transData.contact || 'سارة',
-            amount: transData.amount,
-            currency: 'جنيه', // العهدة دائماً بالجنيه
-            category: transData.category,
-            beneficiary: transData.contact_name || '',
-            description: transData.description,
-            user_name: user.name,
-            telegram_id: user.telegram_id
-          };
-          Logger.log('Custody data: ' + JSON.stringify(custodyData));
+        // حفظ المعاملة في شيت الحركات الرئيسي (بما فيها العهدة)
+        result = addTransaction(transData);
+        Logger.log('addTransaction result: ' + JSON.stringify(result));
 
-          result = addCustodyTransaction(custodyData);
-          Logger.log('Custody result: ' + JSON.stringify(result));
+        if (result && result.success) {
+          detail = transData.type + ': ' + transData.amount + ' ' + transData.currency;
 
-          if (result && result.success) {
-            detail = transData.type + ': ' + transData.amount + ' ' + transData.currency;
-            if (transData.type === 'إيداع_عهدة') {
-              detail += ' لـ ' + (transData.contact || 'سارة');
-            } else {
-              detail += ' (' + (transData.category || 'متنوع') + ')';
-              if (transData.contact) {
-                detail += ' لـ ' + transData.contact;
-              }
-            }
-            detail += '\n   💼 رصيد العهدة: ' + result.balance + ' جنيه';
+          // إضافة تفاصيل التحويل/سعر الصرف
+          if (transData.amount_received && transData.exchange_rate) {
+            detail += ' ← ' + transData.amount_received + ' ' + transData.currency_received;
+            detail += ' (سعر: ' + transData.exchange_rate + ')';
           }
-        } else {
-          // حركة عادية
-          result = addTransaction(transData);
 
-          if (result && result.success) {
-            detail = transData.type + ': ' + transData.amount + ' ' + transData.currency;
+          // إضافة جهة الاتصال
+          if (transData.contact) {
+            detail += ' لـ ' + transData.contact;
+          }
 
-            // إضافة تفاصيل التحويل
-            if (transData.amount_received && transData.exchange_rate) {
-              detail += ' ← ' + transData.amount_received + ' ' + transData.currency_received;
-              detail += ' (سعر: ' + transData.exchange_rate + ')';
-            }
-
-            // إضافة جهة الاتصال
-            if (transData.contact) {
-              detail += ' لـ ' + transData.contact;
-            }
+          // لو عهدة، نحسب الرصيد من شيت الحركات
+          if (transData.type === 'إيداع_عهدة' || transData.type === 'صرف_من_عهدة') {
+            var custodian = transData.contact || 'سارة';
+            var balance = calculateCustodyBalanceFromTransactions(custodian);
+            detail += '\n   💼 رصيد العهدة: ' + balance + ' جنيه';
           }
         }
 

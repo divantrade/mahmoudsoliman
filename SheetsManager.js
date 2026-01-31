@@ -265,24 +265,32 @@ function addDefaultCategories() {
     const rows = [];
 
     // تصنيفات الدخل
-    DEFAULT_CATEGORIES.دخل.forEach(cat => {
-      rows.push([cat.كود, cat.اسم, 'دخل', 'ريال', 'نعم']);
-    });
+    if (DEFAULT_CATEGORIES.دخل) {
+      DEFAULT_CATEGORIES.دخل.forEach(function(cat) {
+        rows.push([cat.كود, cat.اسم, 'دخل', 'ريال', 'نعم']);
+      });
+    }
 
-    // تصنيفات المصروفات في السعودية
-    DEFAULT_CATEGORIES.مصروف_سعودي.forEach(cat => {
-      rows.push([cat.كود, cat.اسم, 'مصروف', 'ريال', 'نعم']);
-    });
+    // تصنيفات المصروفات
+    if (DEFAULT_CATEGORIES.مصروف) {
+      DEFAULT_CATEGORIES.مصروف.forEach(function(cat) {
+        rows.push([cat.كود, cat.اسم, 'مصروف', 'ريال', 'نعم']);
+      });
+    }
 
-    // تصنيفات المصروفات في مصر
-    DEFAULT_CATEGORIES.مصروف_مصر.forEach(cat => {
-      rows.push([cat.كود, cat.اسم, 'تحويل', 'جنيه', 'نعم']);
-    });
+    // تصنيفات التحويلات
+    if (DEFAULT_CATEGORIES.تحويل) {
+      DEFAULT_CATEGORIES.تحويل.forEach(function(cat) {
+        rows.push([cat.كود, cat.اسم, 'تحويل', 'جنيه', 'نعم']);
+      });
+    }
 
     // تصنيفات العهدة
-    DEFAULT_CATEGORIES.عهدة.forEach(cat => {
-      rows.push([cat.كود, cat.اسم, 'عهدة', 'جنيه', 'نعم']);
-    });
+    if (DEFAULT_CATEGORIES.عهدة) {
+      DEFAULT_CATEGORIES.عهدة.forEach(function(cat) {
+        rows.push([cat.كود, cat.اسم, 'عهدة', 'جنيه', 'نعم']);
+      });
+    }
 
     if (rows.length > 0) {
       sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
@@ -775,42 +783,100 @@ function getCustodyBalance(custodian) {
 }
 
 /**
+ * ⭐ حساب رصيد العهدة من شيت الحركات الرئيسي
+ * @param {string} custodian - اسم أمين العهدة
+ * @returns {number} الرصيد الحالي
+ */
+function calculateCustodyBalanceFromTransactions(custodian) {
+  try {
+    var sheet = getOrCreateSheet(SHEETS.TRANSACTIONS);
+    var data = sheet.getDataRange().getValues();
+
+    var balance = 0;
+    var custodianLower = (custodian || 'سارة').toLowerCase();
+
+    // Headers: ID, التاريخ, الوقت, النوع, التصنيف, المبلغ, العملة, المبلغ_المستلم, عملة_الاستلام, سعر_الصرف, جهة_الاتصال, ...
+    for (var i = 1; i < data.length; i++) {
+      var type = data[i][3]; // النوع
+      var contact = (data[i][10] || '').toString().toLowerCase(); // جهة_الاتصال
+
+      // التحقق من أن الحركة لأمين العهدة المحدد
+      if (contact.indexOf(custodianLower) === -1) {
+        continue;
+      }
+
+      if (type === 'إيداع_عهدة') {
+        // المبلغ المستلم (بالجنيه) أو المبلغ الأصلي
+        var amountReceived = parseFloat(data[i][7]) || 0;
+        var amount = parseFloat(data[i][5]) || 0;
+        balance += amountReceived > 0 ? amountReceived : amount;
+      } else if (type === 'صرف_من_عهدة') {
+        var amount = parseFloat(data[i][5]) || 0;
+        balance -= amount;
+      }
+    }
+
+    Logger.log('Custody balance for ' + custodian + ': ' + balance);
+    return balance;
+
+  } catch (error) {
+    Logger.log('Error calculating custody balance: ' + error.toString());
+    return 0;
+  }
+}
+
+/**
  * تقرير العهدة (الإيداعات والمصروفات والرصيد)
+ * ⭐ يقرأ من شيت الحركات الرئيسي وليس شيت العهد
  * @param {string} custodian - اسم أمين العهدة
  * @returns {Object} تقرير العهدة
  */
 function getCustodyReport(custodian) {
   try {
-    const sheet = getOrCreateSheet(SHEETS.CUSTODY);
-    const data = sheet.getDataRange().getValues();
+    var sheet = getOrCreateSheet(SHEETS.TRANSACTIONS);
+    var data = sheet.getDataRange().getValues();
 
-    const custodianLower = (custodian || 'سارة').toLowerCase();
+    var custodianLower = (custodian || 'سارة').toLowerCase();
 
-    let totalDeposits = 0;
-    let totalExpenses = 0;
-    const transactions = [];
+    var totalDeposits = 0;
+    var totalExpenses = 0;
+    var transactions = [];
 
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][4] && data[i][4].toString().toLowerCase() === custodianLower) {
-        const type = data[i][3];
-        const amount = parseFloat(data[i][5]) || 0;
+    // Headers: ID, التاريخ, الوقت, النوع, التصنيف, المبلغ, العملة, المبلغ_المستلم, عملة_الاستلام, سعر_الصرف, جهة_الاتصال, الوصف, ...
+    for (var i = 1; i < data.length; i++) {
+      var type = data[i][3];
+      var contact = (data[i][10] || '').toString().toLowerCase();
 
-        if (type === 'إيداع_عهدة') {
-          totalDeposits += amount;
-        } else if (type === 'صرف_من_عهدة') {
-          totalExpenses += amount;
-        }
-
-        transactions.push({
-          date: data[i][1],
-          type: type,
-          amount: amount,
-          category: data[i][7],
-          beneficiary: data[i][8],
-          description: data[i][9],
-          balance_after: data[i][10]
-        });
+      // التحقق من أن الحركة لأمين العهدة المحدد
+      if (contact.indexOf(custodianLower) === -1) {
+        continue;
       }
+
+      // فقط حركات العهدة
+      if (type !== 'إيداع_عهدة' && type !== 'صرف_من_عهدة') {
+        continue;
+      }
+
+      var amount = parseFloat(data[i][5]) || 0;
+      var amountReceived = parseFloat(data[i][7]) || 0;
+
+      if (type === 'إيداع_عهدة') {
+        // للإيداع: نستخدم المبلغ المستلم (بالجنيه) إن وجد
+        var depositAmount = amountReceived > 0 ? amountReceived : amount;
+        totalDeposits += depositAmount;
+      } else if (type === 'صرف_من_عهدة') {
+        totalExpenses += amount;
+      }
+
+      transactions.push({
+        date: data[i][1],
+        type: type,
+        amount: amountReceived > 0 ? amountReceived : amount,
+        currency: data[i][6],
+        category: data[i][4],
+        description: data[i][11],
+        exchange_rate: data[i][9]
+      });
     }
 
     return {
