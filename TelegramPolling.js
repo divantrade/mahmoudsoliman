@@ -465,11 +465,26 @@ function sendCustodyReport(chatId, custodian) {
 function processCustodyDirectly(chatId, text, user) {
   Logger.log('=== processCustodyDirectly START ===');
   Logger.log('Text: ' + text);
-  Logger.log('User: ' + JSON.stringify(user));
+  Logger.log('User: ' + (user ? JSON.stringify(user) : 'NULL'));
+
+  // التحقق من المدخلات
+  if (!chatId) {
+    Logger.log('ERROR: chatId is missing');
+    return;
+  }
+
+  if (!user) {
+    Logger.log('ERROR: user is missing');
+    sendMessage(chatId, '❌ خطأ: بيانات المستخدم غير موجودة');
+    return;
+  }
 
   try {
-    // تحويل الأرقام العربية إلى إنجليزية
-    var arabicNums = {'٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9'};
+    // تحويل الأرقام العربية والهندية إلى إنجليزية
+    var arabicNums = {
+      '٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9',
+      '۰':'0','۱':'1','۲':'2','۳':'3','۴':'4','۵':'5','۶':'6','۷':'7','۸':'8','۹':'9'
+    };
     var normalizedText = text;
     for (var ar in arabicNums) {
       normalizedText = normalizedText.replace(new RegExp(ar, 'g'), arabicNums[ar]);
@@ -478,9 +493,9 @@ function processCustodyDirectly(chatId, text, user) {
 
     // تحديد أمين العهدة (سارة أو مصطفى)
     var custodian = 'سارة'; // افتراضي
-    if (/مصطف[يى]/i.test(text)) {
+    if (/مصطف[يى]|مصطفا/i.test(text)) {
       custodian = 'مصطفى';
-    } else if (/سار[ةه]/i.test(text)) {
+    } else if (/سار[ةه]|ساره/i.test(text)) {
       custodian = 'سارة';
     }
     Logger.log('Custodian: ' + custodian);
@@ -547,10 +562,13 @@ function processCustodyDirectly(chatId, text, user) {
 
     // التحقق من وجود مبلغ
     if (!amount || amount <= 0) {
-      Logger.log('ERROR: No amount found');
-      sendMessage(chatId, '❌ لم أجد مبلغ في الرسالة.\n\nجرب:\n• حولت لسارة 5000 عهدة\n• حولت لسارة 500 ريال ما يعادل 6000 جنيه عهدة');
+      Logger.log('ERROR: No amount found in text: ' + normalizedText);
+      Logger.log('All numbers found: ' + JSON.stringify(normalizedText.match(/\d+/g)));
+      sendMessage(chatId, '❌ لم أجد مبلغ في الرسالة.\n\nجرب:\n• حولت لسارة 5000 عهدة\n• حولت لسارة 500 ريال ما يعادل 6000 جنيه عهدة\n• عملت ايداع عهده لسارة 1000 ريال');
       return;
     }
+
+    Logger.log('Final extraction - Amount: ' + amount + ', Currency: ' + currency + ', AmountReceived: ' + amountReceived + ', Rate: ' + exchangeRate);
 
     // إنشاء بيانات المعاملة - تُحفظ في شيت الحركات الرئيسي
     var transData = {
@@ -570,7 +588,23 @@ function processCustodyDirectly(chatId, text, user) {
     Logger.log('Transaction data: ' + JSON.stringify(transData));
 
     // ⭐ إرسال نموذج المراجعة (نفس المصروفات العادية)
-    sendPreviewWithButtons(chatId, [transData], user);
+    Logger.log('Sending preview with buttons...');
+    try {
+      sendPreviewWithButtons(chatId, [transData], user);
+      Logger.log('Preview sent successfully');
+    } catch (previewError) {
+      Logger.log('Preview error: ' + previewError.toString());
+      // Fallback: إرسال رسالة تأكيد بسيطة
+      var confirmMsg = '📋 *تأكيد العهدة:*\n\n';
+      confirmMsg += '💼 أمين العهدة: ' + custodian + '\n';
+      confirmMsg += '💰 المبلغ: ' + amount + ' ' + currency + '\n';
+      if (amountReceived) {
+        confirmMsg += '📥 المستلم: ' + amountReceived + ' جنيه\n';
+        confirmMsg += '📊 سعر الصرف: ' + exchangeRate + '\n';
+      }
+      confirmMsg += '\n⚠️ لم أستطع عرض أزرار التأكيد. أعد إرسال الرسالة.';
+      sendMessage(chatId, confirmMsg);
+    }
 
   } catch (error) {
     Logger.log('EXCEPTION in processCustodyDirectly: ' + error.toString());
@@ -586,25 +620,44 @@ function processCustodyDirectly(chatId, text, user) {
  */
 function processUserMessage(chatId, text, user) {
   Logger.log('🤖 معالجة: ' + text);
+  Logger.log('🔍 Text bytes: ' + encodeURIComponent(text));
 
   sendChatAction(chatId, 'typing');
 
   try {
     // ⭐⭐⭐ فحص كلمة العهدة أولاً - معالجة مباشرة بدون Gemini ⭐⭐⭐
-    var textLower = text.toLowerCase();
+
+    // تنظيف النص من الأحرف الخفية (zero-width characters)
+    var cleanText = text.replace(/[\u200B-\u200D\u200E\u200F\uFEFF\u00A0]/g, '');
+
+    // توحيد الأحرف العربية المتشابهة للبحث
+    var normalizedForSearch = cleanText
+      .replace(/[ةه]/g, 'ه')   // توحيد التاء المربوطة والهاء
+      .replace(/[يى]/g, 'ي')   // توحيد الياء
+      .replace(/[أإآا]/g, 'ا'); // توحيد الألف
+
+    Logger.log('Clean text: ' + cleanText);
+    Logger.log('Normalized for search: ' + normalizedForSearch);
+
+    // البحث عن كلمة العهدة بأشكالها المختلفة
     var hasOhdaKeyword = (
-      textLower.indexOf('عهدة') !== -1 ||
-      textLower.indexOf('عهده') !== -1 ||
-      textLower.indexOf('العهدة') !== -1 ||
-      textLower.indexOf('العهده') !== -1
+      normalizedForSearch.indexOf('عهده') !== -1 ||
+      normalizedForSearch.indexOf('العهده') !== -1 ||
+      /عهد[ةه]/i.test(cleanText) ||
+      /ايداع/i.test(cleanText) && /سار[ةه]|مصطف[يى]/i.test(cleanText)
     );
 
-    Logger.log('Checking for custody keyword in: ' + text);
+    Logger.log('Checking for custody keyword');
     Logger.log('Has custody keyword: ' + hasOhdaKeyword);
 
     if (hasOhdaKeyword) {
       Logger.log('*** CUSTODY KEYWORD DETECTED - Processing directly ***');
-      processCustodyDirectly(chatId, text, user);
+      try {
+        processCustodyDirectly(chatId, cleanText, user);
+      } catch (custodyError) {
+        Logger.log('❌ Error in processCustodyDirectly: ' + custodyError.toString());
+        sendMessage(chatId, '❌ خطأ في معالجة العهدة: ' + custodyError.message);
+      }
       return;
     }
 
