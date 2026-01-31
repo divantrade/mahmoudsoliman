@@ -299,34 +299,55 @@ function processUserMessage(chatId, text, user) {
       for (let i = 0; i < transactions.length; i++) {
         const trans = transactions[i];
 
-        // تحويل المفاتيح العربية للإنجليزية للحفظ
+        // تحويل العملة من العربي للكود
+        const currencyMap = { 'ريال': 'ريال', 'جنيه': 'جنيه', 'دولار': 'دولار', 'SAR': 'ريال', 'EGP': 'جنيه', 'USD': 'دولار' };
+        const rawCurrency = trans.عملة || trans.currency || 'ريال';
+        const currency = currencyMap[rawCurrency] || 'ريال';
+
+        const rawCurrencyReceived = trans.عملة_مستلمة || trans.currency_received || 'جنيه';
+        const currencyReceived = currencyMap[rawCurrencyReceived] || 'جنيه';
+
+        // تحويل المفاتيح العربية للحفظ
         const transData = {
           type: trans.نوع || trans.type,
           amount: trans.مبلغ || trans.amount,
-          currency: (trans.عملة === 'ريال' || trans.currency === 'SAR') ? 'SAR' : 'EGP',
+          currency: currency,
           category: trans.تصنيف || trans.category,
           contact: trans.جهة || trans.contact,
           contact_name: trans.اسم_الجهة || trans.contact_name,
           description: trans.وصف || trans.description,
           amount_received: trans.مبلغ_مستلم || trans.amount_received,
+          currency_received: currencyReceived,
+          exchange_rate: trans.سعر_الصرف || trans.exchange_rate,
           gold_weight: trans.وزن_الذهب || trans.gold_weight,
           gold_karat: trans.عيار_الذهب || trans.gold_karat,
           user_name: user.name,
           telegram_id: user.telegram_id
         };
 
-        // حساب سعر الصرف للتحويلات
-        if (transData.amount && transData.amount_received) {
+        // حساب سعر الصرف إذا لم يُذكر
+        if (transData.amount && transData.amount_received && !transData.exchange_rate) {
           transData.exchange_rate = (transData.amount_received / transData.amount).toFixed(2);
-          transData.currency_received = 'EGP';
         }
 
         const result = addTransaction(transData);
 
         if (result && result.success) {
           successCount++;
-          const curr = (transData.currency === 'EGP') ? 'ج.م' : 'ر.س';
-          details.push(transData.type + ': ' + transData.amount + ' ' + curr);
+          let detail = transData.type + ': ' + transData.amount + ' ' + transData.currency;
+
+          // إضافة تفاصيل التحويل
+          if (transData.amount_received && transData.exchange_rate) {
+            detail += ' ← ' + transData.amount_received + ' ' + transData.currency_received;
+            detail += ' (سعر: ' + transData.exchange_rate + ')';
+          }
+
+          // إضافة جهة الاتصال
+          if (transData.contact) {
+            detail += ' لـ ' + transData.contact;
+          }
+
+          details.push(detail);
         }
       }
     }

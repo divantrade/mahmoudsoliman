@@ -96,7 +96,7 @@ function getSheetHeaders(sheetName) {
 }
 
 /**
- * Initialize all sheets
+ * إنشاء جميع الشيتات
  */
 function initializeAllSheets() {
   const sheetNames = Object.values(SHEETS);
@@ -105,12 +105,149 @@ function initializeAllSheets() {
     getOrCreateSheet(sheetName);
   });
 
-  // Add default data
+  // إضافة البيانات الافتراضية
   addDefaultCategories();
   addDefaultContacts();
   addDefaultSettings();
 
+  // إضافة القوائم المنسدلة
+  addDropdownValidations();
+
   return 'تم إنشاء جميع الشيتات بنجاح!';
+}
+
+/**
+ * إضافة القوائم المنسدلة (Dropdowns) للشيتات
+ */
+function addDropdownValidations() {
+  // شيت الحركات
+  addTransactionsDropdowns();
+
+  // شيت التصنيفات
+  addCategoriesDropdowns();
+
+  // شيت جهات الاتصال
+  addContactsDropdowns();
+
+  // شيت سعر الصرف
+  addExchangeRateDropdowns();
+
+  Logger.log('✅ تم إضافة القوائم المنسدلة');
+}
+
+/**
+ * إضافة القوائم المنسدلة لشيت الحركات
+ */
+function addTransactionsDropdowns() {
+  const sheet = getOrCreateSheet(SHEETS.TRANSACTIONS);
+  const lastRow = 1000; // عدد الصفوف للـ validation
+
+  // عمود النوع (4) - أنواع المعاملات
+  const typeRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(TRANSACTION_TYPE_LIST, true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, 4, lastRow, 1).setDataValidation(typeRule);
+
+  // عمود التصنيف (5) - من شيت التصنيفات
+  const categoryRule = SpreadsheetApp.newDataValidation()
+    .requireValueInRange(sheet.getParent().getSheetByName(SHEETS.CATEGORIES).getRange('A2:A100'), true)
+    .setAllowInvalid(true)
+    .build();
+  sheet.getRange(2, 5, lastRow, 1).setDataValidation(categoryRule);
+
+  // عمود العملة (7) - العملات
+  const currencyRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(CURRENCY_LIST, true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, 7, lastRow, 1).setDataValidation(currencyRule);
+
+  // عمود عملة الاستلام (9) - العملات
+  sheet.getRange(2, 9, lastRow, 1).setDataValidation(currencyRule);
+
+  // عمود جهة الاتصال (11) - من شيت جهات الاتصال
+  const contactRule = SpreadsheetApp.newDataValidation()
+    .requireValueInRange(sheet.getParent().getSheetByName(SHEETS.CONTACTS).getRange('A2:A100'), true)
+    .setAllowInvalid(true)
+    .build();
+  sheet.getRange(2, 11, lastRow, 1).setDataValidation(contactRule);
+}
+
+/**
+ * إضافة القوائم المنسدلة لشيت التصنيفات
+ */
+function addCategoriesDropdowns() {
+  const sheet = getOrCreateSheet(SHEETS.CATEGORIES);
+  const lastRow = 100;
+
+  // عمود النوع (3)
+  const typeRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['دخل', 'مصروف', 'تحويل'], true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, 3, lastRow, 1).setDataValidation(typeRule);
+
+  // عمود العملة (4)
+  const currencyRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(CURRENCY_LIST, true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, 4, lastRow, 1).setDataValidation(currencyRule);
+
+  // عمود نشط (5)
+  const activeRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['نعم', 'لا'], true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, 5, lastRow, 1).setDataValidation(activeRule);
+}
+
+/**
+ * إضافة القوائم المنسدلة لشيت جهات الاتصال
+ */
+function addContactsDropdowns() {
+  const sheet = getOrCreateSheet(SHEETS.CONTACTS);
+  const lastRow = 100;
+
+  // عمود العلاقة (3)
+  const relationRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['زوجة', 'أخ', 'أخت', 'أب', 'أم', 'ابن', 'ابنة', 'صديق', 'آخر'], true)
+    .setAllowInvalid(true)
+    .build();
+  sheet.getRange(2, 3, lastRow, 1).setDataValidation(relationRule);
+
+  // عمود العملة (5)
+  const currencyRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(CURRENCY_LIST, true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, 5, lastRow, 1).setDataValidation(currencyRule);
+
+  // عمود نشط (7)
+  const activeRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['نعم', 'لا'], true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, 7, lastRow, 1).setDataValidation(activeRule);
+}
+
+/**
+ * إضافة القوائم المنسدلة لشيت سعر الصرف
+ */
+function addExchangeRateDropdowns() {
+  const sheet = getOrCreateSheet(SHEETS.EXCHANGE_RATES);
+  const lastRow = 500;
+
+  // عمود من_عملة (2)
+  const currencyRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(CURRENCY_LIST, true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, 2, lastRow, 1).setDataValidation(currencyRule);
+
+  // عمود إلى_عملة (3)
+  sheet.getRange(2, 3, lastRow, 1).setDataValidation(currencyRule);
 }
 
 /**
