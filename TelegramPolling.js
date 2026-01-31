@@ -575,3 +575,66 @@ function manualCheck() {
   checkForUpdates();
   return 'تم';
 }
+
+/**
+ * ⭐ إعادة تعيين - شغّل هذا إذا البوت لا يرد
+ */
+function resetBot() {
+  // حذف last_update_id القديم
+  const props = PropertiesService.getScriptProperties();
+  props.deleteProperty(LAST_UPDATE_KEY);
+  Logger.log('✅ Reset last_update_id');
+
+  // جلب آخر update وتخطيه
+  const url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/getUpdates';
+  const response = UrlFetchApp.fetch(url, {
+    method: 'POST',
+    contentType: 'application/json',
+    payload: JSON.stringify({ offset: -1, limit: 1 }),
+    muteHttpExceptions: true
+  });
+
+  const result = JSON.parse(response.getContentText());
+  Logger.log('Updates response: ' + response.getContentText());
+
+  if (result.ok && result.result && result.result.length > 0) {
+    const lastUpdate = result.result[result.result.length - 1];
+    props.setProperty(LAST_UPDATE_KEY, lastUpdate.update_id.toString());
+    Logger.log('✅ Set last_update_id to: ' + lastUpdate.update_id);
+  }
+
+  // إرسال رسالة تأكيد
+  sendMessage(786700586, '🔄 *تم إعادة تعيين البوت!*\n\nأرسل أي رسالة الآن للتجربة.');
+
+  return 'تم إعادة التعيين! أرسل رسالة جديدة للتجربة.';
+}
+
+/**
+ * عرض حالة البوت
+ */
+function botStatus() {
+  const props = PropertiesService.getScriptProperties();
+  const lastId = props.getProperty(LAST_UPDATE_KEY);
+
+  // جلب التحديثات المعلقة
+  const url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/getUpdates';
+  const response = UrlFetchApp.fetch(url, {
+    method: 'POST',
+    contentType: 'application/json',
+    payload: JSON.stringify({ offset: lastId ? parseInt(lastId) + 1 : 0, limit: 100 }),
+    muteHttpExceptions: true
+  });
+
+  const result = JSON.parse(response.getContentText());
+  const pendingCount = result.ok ? result.result.length : 0;
+
+  Logger.log('=== Bot Status ===');
+  Logger.log('Last Update ID: ' + (lastId || 'none'));
+  Logger.log('Pending Updates: ' + pendingCount);
+
+  if (pendingCount > 0) {
+    Logger.log('First pending: ' + JSON.stringify(result.result[0]));
+  }
+
+  return 'Last ID: ' + (lastId || 'none') + ', Pending: ' + pendingCount;
+}
