@@ -139,17 +139,18 @@ function classifyCategory(description, type) {
     const apiKey = CONFIG.GEMINI_API_KEY;
     const apiUrl = CONFIG.GEMINI_API_URL + '?key=' + apiKey;
 
+    // ⭐ قراءة التصنيفات من الشيت ديناميكياً
     let categories;
     if (type === 'دخل') {
-      categories = DEFAULT_CATEGORIES.دخل.map(c => c.كود).join('، ');
+      categories = getCategoryCodesForAI('دخل');
     } else if (type === 'مصروف') {
-      categories = DEFAULT_CATEGORIES.مصروف.map(c => c.كود).join('، ');
+      categories = getCategoryCodesForAI('مصروف');
     } else if (type === 'تحويل') {
-      categories = DEFAULT_CATEGORIES.تحويل.map(c => c.كود).join('، ');
+      categories = getCategoryCodesForAI('تحويل');
     } else if (type === 'صرف_من_عهدة' || type === 'إيداع_عهدة') {
-      categories = DEFAULT_CATEGORIES.عهدة.map(c => c.كود).join('، ');
+      categories = getCategoryCodesForAI('عهدة');
     } else {
-      categories = DEFAULT_CATEGORIES.مصروف.map(c => c.كود).join('، ');
+      categories = getCategoryCodesForAI('مصروف');
     }
 
     const prompt = `صنف هذه المعاملة:

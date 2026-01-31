@@ -219,7 +219,13 @@ function handleCommand(chatId, text, user) {
 
     case '/custody':
     case '/عهدة':
+    case '/sara':
       sendCustodyReport(chatId, 'سارة');
+      break;
+
+    case '/mostafa':
+    case '/مصطفى':
+      sendCustodyReport(chatId, 'مصطفى');
       break;
 
     case '/associations':
@@ -262,6 +268,9 @@ function handleMenuButton(chatId, text, user) {
       return true;
     case '💼 عهدة سارة':
       sendCustodyReport(chatId, 'سارة');
+      return true;
+    case '📦 عهدة مصطفى':
+      sendCustodyReport(chatId, 'مصطفى');
       return true;
     case '👨‍👩‍👧‍👦 الإخوة':
       sendMessage(chatId, generateSiblingsReport());
@@ -467,8 +476,9 @@ function sendWelcomeMessage(chatId, user) {
     keyboard: [
       ['📊 التقارير', '💰 الرصيد'],
       ['📅 تقرير شهري', '💕 تقرير الزوجة'],
-      ['💼 عهدة سارة', '👨‍👩‍👧‍👦 الإخوة'],
-      ['💍 الذهب', '❓ المساعدة']
+      ['💼 عهدة سارة', '📦 عهدة مصطفى'],
+      ['👨‍👩‍👧‍👦 الإخوة', '💍 الذهب'],
+      ['❓ المساعدة']
     ],
     resize_keyboard: true,
     persistent: true
@@ -692,7 +702,8 @@ function setupBotMenu() {
     { command: 'balance', description: '💰 الرصيد الحالي' },
     { command: 'monthly', description: '📅 تقرير الشهر' },
     { command: 'wife', description: '💕 تقرير الزوجة' },
-    { command: 'custody', description: '💼 عهدة سارة' },
+    { command: 'sara', description: '💼 عهدة سارة' },
+    { command: 'mostafa', description: '📦 عهدة مصطفى' },
     { command: 'siblings', description: '👨‍👩‍👧‍👦 تقرير الإخوة' },
     { command: 'gold', description: '💍 تقرير الذهب' },
     { command: 'help', description: '❓ المساعدة' }
