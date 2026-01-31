@@ -255,6 +255,9 @@ function handleMenuButton(chatId, text, user) {
     case '💕 تقرير الزوجة':
       sendMessage(chatId, generateWifeReport());
       return true;
+    case '💼 عهدة سارة':
+      sendCustodyReport(chatId, 'سارة');
+      return true;
     case '👨‍👩‍👧‍👦 الإخوة':
       sendMessage(chatId, generateSiblingsReport());
       return true;
@@ -267,6 +270,38 @@ function handleMenuButton(chatId, text, user) {
     default:
       return false; // ليس زر قائمة
   }
+}
+
+/**
+ * إرسال تقرير العهدة
+ */
+function sendCustodyReport(chatId, custodian) {
+  const report = getCustodyReport(custodian);
+
+  if (!report) {
+    sendMessage(chatId, '❌ لا توجد بيانات للعهدة');
+    return;
+  }
+
+  let msg = '💼 *تقرير عهدة ' + custodian + '*\n';
+  msg += '━━━━━━━━━━━━━━━━━━━━━\n\n';
+
+  msg += '📥 *إجمالي الإيداعات:* ' + report.total_deposits.toLocaleString() + ' جنيه\n';
+  msg += '📤 *إجمالي المصروفات:* ' + report.total_expenses.toLocaleString() + ' جنيه\n';
+  msg += '━━━━━━━━━━━━━━━━━━━━━\n';
+  msg += '💰 *الرصيد الحالي:* ' + report.current_balance.toLocaleString() + ' جنيه\n\n';
+
+  if (report.transactions && report.transactions.length > 0) {
+    msg += '*📋 آخر الحركات:*\n';
+    const lastTrans = report.transactions.slice(-5).reverse();
+    for (let i = 0; i < lastTrans.length; i++) {
+      const t = lastTrans[i];
+      const icon = t.type === 'إيداع_عهدة' ? '📥' : '📤';
+      msg += icon + ' ' + t.amount + ' - ' + (t.category || t.type) + '\n';
+    }
+  }
+
+  sendMessage(chatId, msg);
 }
 
 /**
@@ -330,23 +365,60 @@ function processUserMessage(chatId, text, user) {
           transData.exchange_rate = (transData.amount_received / transData.amount).toFixed(2);
         }
 
-        const result = addTransaction(transData);
+        let result;
+        let detail = '';
+
+        // التحقق من نوع المعاملة (عهدة أو عادية)
+        if (transData.type === 'إيداع_عهدة' || transData.type === 'صرف_من_عهدة') {
+          // حركة عهدة
+          const custodyData = {
+            type: transData.type,
+            custodian: transData.contact || 'سارة',
+            amount: transData.amount,
+            currency: transData.currency,
+            category: transData.category,
+            beneficiary: transData.contact_name || '',
+            description: transData.description,
+            user_name: user.name,
+            telegram_id: user.telegram_id
+          };
+
+          result = addCustodyTransaction(custodyData);
+
+          if (result && result.success) {
+            detail = transData.type + ': ' + transData.amount + ' ' + transData.currency;
+            if (transData.type === 'إيداع_عهدة') {
+              detail += ' لـ ' + (transData.contact || 'سارة');
+            } else {
+              detail += ' (' + (transData.category || 'متنوع') + ')';
+              if (transData.contact) {
+                detail += ' لـ ' + transData.contact;
+              }
+            }
+            detail += '\n   💼 رصيد العهدة: ' + result.balance + ' جنيه';
+          }
+        } else {
+          // حركة عادية
+          result = addTransaction(transData);
+
+          if (result && result.success) {
+            detail = transData.type + ': ' + transData.amount + ' ' + transData.currency;
+
+            // إضافة تفاصيل التحويل
+            if (transData.amount_received && transData.exchange_rate) {
+              detail += ' ← ' + transData.amount_received + ' ' + transData.currency_received;
+              detail += ' (سعر: ' + transData.exchange_rate + ')';
+            }
+
+            // إضافة جهة الاتصال
+            if (transData.contact) {
+              detail += ' لـ ' + transData.contact;
+            }
+          }
+        }
 
         if (result && result.success) {
           successCount++;
-          let detail = transData.type + ': ' + transData.amount + ' ' + transData.currency;
-
-          // إضافة تفاصيل التحويل
-          if (transData.amount_received && transData.exchange_rate) {
-            detail += ' ← ' + transData.amount_received + ' ' + transData.currency_received;
-            detail += ' (سعر: ' + transData.exchange_rate + ')';
-          }
-
-          // إضافة جهة الاتصال
-          if (transData.contact) {
-            detail += ' لـ ' + transData.contact;
-          }
-
           details.push(detail);
         }
       }
@@ -381,7 +453,7 @@ function sendWelcomeMessage(chatId, user) {
     '💰 *سجل معاملاتك بسهولة:*\n' +
     '• استلمت راتب 8500\n' +
     '• صرفت 150 غداء\n' +
-    '• حولت لمراتي 3000 ريال\n\n' +
+    '• حولت لسارة 10000 عهدة\n\n' +
     '📊 /report - التقارير\n' +
     '❓ /help - المساعدة';
 
@@ -390,8 +462,8 @@ function sendWelcomeMessage(chatId, user) {
     keyboard: [
       ['📊 التقارير', '💰 الرصيد'],
       ['📅 تقرير شهري', '💕 تقرير الزوجة'],
-      ['👨‍👩‍👧‍👦 الإخوة', '💍 الذهب'],
-      ['❓ المساعدة']
+      ['💼 عهدة سارة', '👨‍👩‍👧‍👦 الإخوة'],
+      ['💍 الذهب', '❓ المساعدة']
     ],
     resize_keyboard: true,
     persistent: true
@@ -413,7 +485,11 @@ function sendHelpMessage(chatId, user) {
     '• صرفت 150 غداء\n' +
     '• دفعت الإيجار 2000\n\n' +
     '*📤 التحويلات:*\n' +
-    '• حولت لمراتي 3000 ريال وصلوا 4000 جنيه\n\n' +
+    '• حولت لمراتي 3000 ريال سعر 13 وصلوا 39000\n\n' +
+    '*💼 العهدة (سارة):*\n' +
+    '• حولت لسارة 10000 عهدة\n' +
+    '• صرفت 500 جمعية من العهدة (سارة)\n' +
+    '• أعطيت محمد 1000 من العهدة (سارة)\n\n' +
     '*📊 التقارير:*\n' +
     '/report - قائمة التقارير\n' +
     '/balance - الرصيد';

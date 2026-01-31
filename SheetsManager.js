@@ -84,6 +84,10 @@ function getSheetHeaders(sheetName) {
       'ID', 'التاريخ', 'النوع', 'الشخص', 'المبلغ', 'العملة',
       'المبلغ_المتبقي', 'الحالة', 'ملاحظات'
     ],
+    'العهد': [
+      'ID', 'التاريخ', 'الوقت', 'النوع', 'أمين_العهدة', 'المبلغ', 'العملة',
+      'التصنيف', 'المستفيد', 'الوصف', 'الرصيد_بعد', 'المستخدم', 'Telegram_ID', 'ملاحظات'
+    ],
     'سعر_الصرف': [
       'التاريخ', 'من_عملة', 'إلى_عملة', 'السعر', 'ملاحظات'
     ],
@@ -273,6 +277,11 @@ function addDefaultCategories() {
     // تصنيفات المصروفات في مصر
     DEFAULT_CATEGORIES.مصروف_مصر.forEach(cat => {
       rows.push([cat.كود, cat.اسم, 'تحويل', 'جنيه', 'نعم']);
+    });
+
+    // تصنيفات العهدة
+    DEFAULT_CATEGORIES.عهدة.forEach(cat => {
+      rows.push([cat.كود, cat.اسم, 'عهدة', 'جنيه', 'نعم']);
     });
 
     if (rows.length > 0) {
@@ -610,5 +619,149 @@ function recordExchangeRate(rate, from, to) {
 
   } catch (error) {
     Logger.log('Error recording exchange rate: ' + error.toString());
+  }
+}
+
+// =====================================================
+// وظائف العهدة (Custody Functions)
+// =====================================================
+
+/**
+ * إضافة حركة عهدة (إيداع أو صرف)
+ * @param {Object} custodyData - بيانات حركة العهدة
+ */
+function addCustodyTransaction(custodyData) {
+  try {
+    const sheet = getOrCreateSheet(SHEETS.CUSTODY);
+    const lastRow = sheet.getLastRow();
+    const newId = lastRow;
+
+    // حساب الرصيد الجديد
+    const currentBalance = getCustodyBalance(custodyData.custodian || 'سارة');
+    let newBalance = currentBalance;
+
+    if (custodyData.type === 'إيداع_عهدة') {
+      newBalance = currentBalance + (custodyData.amount || 0);
+    } else if (custodyData.type === 'صرف_من_عهدة') {
+      newBalance = currentBalance - (custodyData.amount || 0);
+    }
+
+    const now = new Date();
+    const row = [
+      newId,
+      Utilities.formatDate(now, 'Asia/Riyadh', 'yyyy-MM-dd'),
+      Utilities.formatDate(now, 'Asia/Riyadh', 'HH:mm:ss'),
+      custodyData.type || '',
+      custodyData.custodian || 'سارة',
+      custodyData.amount || 0,
+      custodyData.currency || 'جنيه',
+      custodyData.category || '',
+      custodyData.beneficiary || '',
+      custodyData.description || '',
+      newBalance,
+      custodyData.user_name || '',
+      custodyData.telegram_id || '',
+      custodyData.notes || ''
+    ];
+
+    sheet.appendRow(row);
+
+    return {
+      success: true,
+      message: 'تم تسجيل حركة العهدة',
+      id: newId,
+      balance: newBalance
+    };
+
+  } catch (error) {
+    Logger.log('Error in addCustodyTransaction: ' + error.toString());
+    return { success: false, message: error.message };
+  }
+}
+
+/**
+ * الحصول على رصيد العهدة لأمين معين
+ * @param {string} custodian - اسم أمين العهدة
+ * @returns {number} الرصيد الحالي
+ */
+function getCustodyBalance(custodian) {
+  try {
+    const sheet = getOrCreateSheet(SHEETS.CUSTODY);
+    const data = sheet.getDataRange().getValues();
+
+    let balance = 0;
+    const custodianLower = (custodian || 'سارة').toLowerCase();
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][4] && data[i][4].toString().toLowerCase() === custodianLower) {
+        const type = data[i][3];
+        const amount = parseFloat(data[i][5]) || 0;
+
+        if (type === 'إيداع_عهدة') {
+          balance += amount;
+        } else if (type === 'صرف_من_عهدة') {
+          balance -= amount;
+        }
+      }
+    }
+
+    return balance;
+
+  } catch (error) {
+    Logger.log('Error getting custody balance: ' + error.toString());
+    return 0;
+  }
+}
+
+/**
+ * تقرير العهدة (الإيداعات والمصروفات والرصيد)
+ * @param {string} custodian - اسم أمين العهدة
+ * @returns {Object} تقرير العهدة
+ */
+function getCustodyReport(custodian) {
+  try {
+    const sheet = getOrCreateSheet(SHEETS.CUSTODY);
+    const data = sheet.getDataRange().getValues();
+
+    const custodianLower = (custodian || 'سارة').toLowerCase();
+
+    let totalDeposits = 0;
+    let totalExpenses = 0;
+    const transactions = [];
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][4] && data[i][4].toString().toLowerCase() === custodianLower) {
+        const type = data[i][3];
+        const amount = parseFloat(data[i][5]) || 0;
+
+        if (type === 'إيداع_عهدة') {
+          totalDeposits += amount;
+        } else if (type === 'صرف_من_عهدة') {
+          totalExpenses += amount;
+        }
+
+        transactions.push({
+          date: data[i][1],
+          type: type,
+          amount: amount,
+          category: data[i][7],
+          beneficiary: data[i][8],
+          description: data[i][9],
+          balance_after: data[i][10]
+        });
+      }
+    }
+
+    return {
+      custodian: custodian,
+      total_deposits: totalDeposits,
+      total_expenses: totalExpenses,
+      current_balance: totalDeposits - totalExpenses,
+      transactions: transactions
+    };
+
+  } catch (error) {
+    Logger.log('Error getting custody report: ' + error.toString());
+    return null;
   }
 }
