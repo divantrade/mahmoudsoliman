@@ -5,8 +5,8 @@
  * =====================================================
  */
 
-const LAST_UPDATE_KEY = 'last_update_id';
-const PENDING_TRANS_PREFIX = 'pending_trans_';
+var LAST_UPDATE_KEY = 'last_update_id';
+var PENDING_TRANS_PREFIX = 'pending_trans_';
 
 /**
  * ⭐ حفظ معاملة معلقة للمراجعة
@@ -125,22 +125,22 @@ function sendPreviewWithButtons(chatId, transactions, user) {
  * Trigger كل دقيقة → حلقة 55 ثانية → فجوة 5 ثواني
  */
 function checkForUpdates() {
-  const LOOP_DURATION = 55000;  // 55 ثانية
-  const CHECK_INTERVAL = 2000;  // فحص كل 2 ثانية
-  const startTime = Date.now();
+  var LOOP_DURATION = 55000;  // 55 ثانية
+  var CHECK_INTERVAL = 2000;  // فحص كل 2 ثانية
+  var startTime = Date.now();
 
   Logger.log('🚀 Polling started at ' + new Date().toLocaleTimeString());
 
   while (Date.now() - startTime < LOOP_DURATION) {
     try {
-      const lastUpdateId = getLastUpdateId();
-      const updates = getUpdates(lastUpdateId);
+      var lastUpdateId = getLastUpdateId();
+      var updates = getUpdates(lastUpdateId);
 
       if (updates && updates.length > 0) {
         Logger.log('📨 Found ' + updates.length + ' updates');
 
-        for (let i = 0; i < updates.length; i++) {
-          const update = updates[i];
+        for (var i = 0; i < updates.length; i++) {
+          var update = updates[i];
           try {
             processUpdate(update);
           } catch (e) {
@@ -167,23 +167,23 @@ function checkForUpdates() {
  */
 function getUpdates(offset) {
   try {
-    const url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/getUpdates';
+    var url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/getUpdates';
 
-    const payload = {
+    var payload = {
       offset: offset ? offset + 1 : 0,
       limit: 100,
       timeout: 1  // timeout قصير للرد السريع
     };
 
-    const options = {
+    var options = {
       method: 'POST',
       contentType: 'application/json',
       payload: JSON.stringify(payload),
       muteHttpExceptions: true
     };
 
-    const response = UrlFetchApp.fetch(url, options);
-    const result = JSON.parse(response.getContentText());
+    var response = UrlFetchApp.fetch(url, options);
+    var result = JSON.parse(response.getContentText());
 
     if (result.ok) {
       return result.result;
@@ -200,8 +200,8 @@ function getUpdates(offset) {
  */
 function getLastUpdateId() {
   try {
-    const props = PropertiesService.getScriptProperties();
-    const value = props.getProperty(LAST_UPDATE_KEY);
+    var props = PropertiesService.getScriptProperties();
+    var value = props.getProperty(LAST_UPDATE_KEY);
     return value ? parseInt(value) : null;
   } catch (error) {
     return null;
@@ -213,7 +213,7 @@ function getLastUpdateId() {
  */
 function saveLastUpdateId(updateId) {
   try {
-    const props = PropertiesService.getScriptProperties();
+    var props = PropertiesService.getScriptProperties();
     props.setProperty(LAST_UPDATE_KEY, updateId.toString());
   } catch (error) {
     Logger.log('Save error: ' + error.toString());
@@ -255,21 +255,21 @@ function processUpdate(update) {
  * معالجة الرسالة
  */
 function handleMessage(message) {
-  const chatId = message.chat.id;
-  const userId = message.from.id;
-  const userName = message.from.first_name || 'مستخدم';
-  const username = message.from.username || '';
-  const text = message.text || '';
+  var chatId = message.chat.id;
+  var userId = message.from.id;
+  var userName = message.from.first_name || 'مستخدم';
+  var username = message.from.username || '';
+  var text = message.text || '';
 
   Logger.log('📩 Message from ' + userName + ': ' + text);
 
   // جلب أو إنشاء المستخدم
-  let user = getUserByTelegramId(userId);
+  var user = getUserByTelegramId(userId);
 
   // تسجيل تلقائي لأي مستخدم جديد
   if (!user) {
     Logger.log('📝 Registering new user: ' + userName);
-    const role = (userId == 786700586) ? ROLES.ADMIN : ROLES.OWNER;
+    var role = (userId == 786700586) ? ROLES.ADMIN : ROLES.OWNER;
     addUser({
       telegram_id: userId.toString(),
       name: userName,
@@ -310,7 +310,7 @@ function handleMessage(message) {
  * معالجة الأوامر
  */
 function handleCommand(chatId, text, user) {
-  const command = text.split(' ')[0].toLowerCase();
+  var command = text.split(' ')[0].toLowerCase();
   Logger.log('🔧 Command: ' + command);
 
   switch (command) {
@@ -421,14 +421,14 @@ function handleMenuButton(chatId, text, user) {
  * إرسال تقرير العهدة
  */
 function sendCustodyReport(chatId, custodian) {
-  const report = getCustodyReport(custodian);
+  var report = getCustodyReport(custodian);
 
   if (!report) {
     sendMessage(chatId, '❌ لا توجد بيانات للعهدة');
     return;
   }
 
-  let msg = '💼 *تقرير عهدة ' + custodian + '*\n';
+  var msg = '💼 *تقرير عهدة ' + custodian + '*\n';
   msg += '━━━━━━━━━━━━━━━━━━━━━\n\n';
 
   msg += '📥 *إجمالي الإيداعات:* ' + report.total_deposits.toLocaleString() + ' جنيه\n';
@@ -438,10 +438,10 @@ function sendCustodyReport(chatId, custodian) {
 
   if (report.transactions && report.transactions.length > 0) {
     msg += '*📋 آخر الحركات:*\n';
-    const lastTrans = report.transactions.slice(-5).reverse();
-    for (let i = 0; i < lastTrans.length; i++) {
-      const t = lastTrans[i];
-      const icon = t.type === 'إيداع_عهدة' ? '📥' : '📤';
+    var lastTrans = report.transactions.slice(-5).reverse();
+    for (var i = 0; i < lastTrans.length; i++) {
+      var t = lastTrans[i];
+      var icon = t.type === 'إيداع_عهدة' ? '📥' : '📤';
       msg += icon + ' ' + t.amount + ' - ' + (t.category || t.type) + '\n';
     }
   }
@@ -461,8 +461,8 @@ function processCustodyDirectly(chatId, text, user) {
 
   try {
     // تحويل الأرقام العربية إلى إنجليزية
-    const arabicNums = {'٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9'};
-    let normalizedText = text;
+    var arabicNums = {'٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9'};
+    var normalizedText = text;
     for (var ar in arabicNums) {
       normalizedText = normalizedText.replace(new RegExp(ar, 'g'), arabicNums[ar]);
     }
@@ -606,7 +606,7 @@ function processUserMessage(chatId, text, user) {
       return;
     }
 
-    const parsed = parseMessageWithGemini(text, user.name);
+    var parsed = parseMessageWithGemini(text, user.name);
     Logger.log('نتيجة: ' + JSON.stringify(parsed));
 
     // ⭐ إذا فشل الـ API أو أرجع null
@@ -616,12 +616,12 @@ function processUserMessage(chatId, text, user) {
     }
 
     // التحقق من النجاح (يدعم العربي والإنجليزي)
-    const isSuccess = parsed && (parsed.نجاح === true || parsed.success === true);
-    const message = parsed.رسالة || parsed.message;
-    const transactions = parsed.معاملات || parsed.transactions;
+    var isSuccess = parsed && (parsed.نجاح === true || parsed.success === true);
+    var message = parsed.رسالة || parsed.message;
+    var transactions = parsed.معاملات || parsed.transactions;
 
     if (!isSuccess) {
-      const msg = message || '❌ لم أفهم. جرب:\n\n• استلمت راتب 5000\n• صرفت 100 غداء';
+      var msg = message || '❌ لم أفهم. جرب:\n\n• استلمت راتب 5000\n• صرفت 100 غداء';
       sendMessage(chatId, msg);
       return;
     }
@@ -707,7 +707,7 @@ function processUserMessage(chatId, text, user) {
     Logger.log('Stack: ' + error.stack);
 
     // ⭐ رسالة خطأ مفصلة للمستخدم
-    let errorMsg = '❌ حدث خطأ في معالجة رسالتك.\n\n';
+    var errorMsg = '❌ حدث خطأ في معالجة رسالتك.\n\n';
     errorMsg += '💡 جرب كتابتها بشكل أبسط:\n';
     errorMsg += '• حولت لسارة 5000 عهدة\n';
     errorMsg += '• صرفت 100 غداء\n';
@@ -722,7 +722,7 @@ function processUserMessage(chatId, text, user) {
  * رسالة الترحيب
  */
 function sendWelcomeMessage(chatId, user) {
-  const msg = 'مرحباً ' + user.name + '! 👋\n\n' +
+  var msg = 'مرحباً ' + user.name + '! 👋\n\n' +
     '🏦 *نظام حسابات محمود*\n' +
     '━━━━━━━━━━━━━━━━━━━━━\n\n' +
     '💰 *سجل معاملاتك بسهولة:*\n' +
@@ -733,7 +733,7 @@ function sendWelcomeMessage(chatId, user) {
     '❓ /help - المساعدة';
 
   // القائمة الدائمة (Reply Keyboard)
-  const replyKeyboard = {
+  var replyKeyboard = {
     keyboard: [
       ['📊 التقارير', '💰 الرصيد'],
       ['📅 تقرير شهري', '💕 تقرير الزوجة'],
@@ -752,7 +752,7 @@ function sendWelcomeMessage(chatId, user) {
  * رسالة المساعدة
  */
 function sendHelpMessage(chatId, user) {
-  const msg = '📖 *دليل الاستخدام*\n' +
+  var msg = '📖 *دليل الاستخدام*\n' +
     '━━━━━━━━━━━━━━━━━━━━━\n\n' +
     '*💵 الدخل:*\n' +
     '• نزل الراتب 8500\n' +
@@ -777,7 +777,7 @@ function sendHelpMessage(chatId, user) {
  * قائمة التقارير
  */
 function sendReportMenu(chatId) {
-  const keyboard = {
+  var keyboard = {
     inline_keyboard: [
       [
         { text: '📊 الشهري', callback_data: 'rpt_monthly' },
@@ -953,23 +953,23 @@ function handleEditMessage(chatId) {
  */
 function sendBalanceSummary(chatId) {
   try {
-    const sheet = getOrCreateSheet(SHEETS.TRANSACTIONS);
-    const data = sheet.getDataRange().getValues();
+    var sheet = getOrCreateSheet(SHEETS.TRANSACTIONS);
+    var data = sheet.getDataRange().getValues();
 
-    let income = 0, expense = 0, transfer = 0;
+    var income = 0, expense = 0, transfer = 0;
 
-    for (let i = 1; i < data.length; i++) {
-      const type = data[i][3];
-      const amount = parseFloat(data[i][5]) || 0;
+    for (var i = 1; i < data.length; i++) {
+      var type = data[i][3];
+      var amount = parseFloat(data[i][5]) || 0;
 
       if (type === 'دخل') income += amount;
       else if (type === 'مصروف') expense += amount;
       else if (type === 'تحويل') transfer += amount;
     }
 
-    const balance = income - expense - transfer;
+    var balance = income - expense - transfer;
 
-    const msg = '💰 *ملخص الرصيد*\n' +
+    var msg = '💰 *ملخص الرصيد*\n' +
       '━━━━━━━━━━━━━━━━━━━━━\n\n' +
       '📥 الدخل: ' + formatNumber(income) + ' ر.س\n' +
       '📤 المصروفات: ' + formatNumber(expense) + ' ر.س\n' +
@@ -990,9 +990,9 @@ function sendBalanceSummary(chatId) {
  */
 function sendMessage(chatId, text, replyMarkup) {
   try {
-    const url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/sendMessage';
+    var url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/sendMessage';
 
-    const payload = {
+    var payload = {
       chat_id: chatId,
       text: text,
       parse_mode: 'Markdown'
@@ -1002,15 +1002,15 @@ function sendMessage(chatId, text, replyMarkup) {
       payload.reply_markup = JSON.stringify(replyMarkup);
     }
 
-    const options = {
+    var options = {
       method: 'POST',
       contentType: 'application/json',
       payload: JSON.stringify(payload),
       muteHttpExceptions: true
     };
 
-    const response = UrlFetchApp.fetch(url, options);
-    const result = JSON.parse(response.getContentText());
+    var response = UrlFetchApp.fetch(url, options);
+    var result = JSON.parse(response.getContentText());
 
     if (!result.ok) {
       Logger.log('Send failed: ' + response.getContentText());
@@ -1026,7 +1026,7 @@ function sendMessage(chatId, text, replyMarkup) {
  */
 function sendChatAction(chatId, action) {
   try {
-    const url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/sendChatAction';
+    var url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/sendChatAction';
     UrlFetchApp.fetch(url, {
       method: 'POST',
       contentType: 'application/json',
@@ -1041,7 +1041,7 @@ function sendChatAction(chatId, action) {
  */
 function answerCallbackQuery(callbackQueryId) {
   try {
-    const url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/answerCallbackQuery';
+    var url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/answerCallbackQuery';
     UrlFetchApp.fetch(url, {
       method: 'POST',
       contentType: 'application/json',
@@ -1056,7 +1056,7 @@ function answerCallbackQuery(callbackQueryId) {
  * شغّل هذه الدالة مرة واحدة فقط
  */
 function setupBotMenu() {
-  const commands = [
+  var commands = [
     { command: 'start', description: '🏠 البداية والقائمة الرئيسية' },
     { command: 'report', description: '📊 التقارير' },
     { command: 'balance', description: '💰 الرصيد الحالي' },
@@ -1070,15 +1070,15 @@ function setupBotMenu() {
   ];
 
   try {
-    const url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/setMyCommands';
-    const response = UrlFetchApp.fetch(url, {
+    var url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/setMyCommands';
+    var response = UrlFetchApp.fetch(url, {
       method: 'POST',
       contentType: 'application/json',
       payload: JSON.stringify({ commands: commands }),
       muteHttpExceptions: true
     });
 
-    const result = JSON.parse(response.getContentText());
+    var result = JSON.parse(response.getContentText());
     if (result.ok) {
       Logger.log('✅ تم إعداد قائمة البوت بنجاح!');
       return '✅ تم إعداد قائمة البوت! اضغط على ☰ في تيليجرام لرؤية القائمة';
@@ -1097,8 +1097,8 @@ function setupBotMenu() {
  */
 function createPollingTrigger() {
   // حذف القديم
-  const triggers = ScriptApp.getProjectTriggers();
-  for (let i = 0; i < triggers.length; i++) {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
     if (triggers[i].getHandlerFunction() === 'checkForUpdates') {
       ScriptApp.deleteTrigger(triggers[i]);
     }
@@ -1118,8 +1118,8 @@ function createPollingTrigger() {
  * إيقاف
  */
 function stopPolling() {
-  const triggers = ScriptApp.getProjectTriggers();
-  for (let i = 0; i < triggers.length; i++) {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
     if (triggers[i].getHandlerFunction() === 'checkForUpdates') {
       ScriptApp.deleteTrigger(triggers[i]);
     }
@@ -1153,24 +1153,24 @@ function manualCheck() {
  */
 function resetBot() {
   // حذف last_update_id القديم
-  const props = PropertiesService.getScriptProperties();
+  var props = PropertiesService.getScriptProperties();
   props.deleteProperty(LAST_UPDATE_KEY);
   Logger.log('✅ Reset last_update_id');
 
   // جلب آخر update وتخطيه
-  const url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/getUpdates';
-  const response = UrlFetchApp.fetch(url, {
+  var url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/getUpdates';
+  var response = UrlFetchApp.fetch(url, {
     method: 'POST',
     contentType: 'application/json',
     payload: JSON.stringify({ offset: -1, limit: 1 }),
     muteHttpExceptions: true
   });
 
-  const result = JSON.parse(response.getContentText());
+  var result = JSON.parse(response.getContentText());
   Logger.log('Updates response: ' + response.getContentText());
 
   if (result.ok && result.result && result.result.length > 0) {
-    const lastUpdate = result.result[result.result.length - 1];
+    var lastUpdate = result.result[result.result.length - 1];
     props.setProperty(LAST_UPDATE_KEY, lastUpdate.update_id.toString());
     Logger.log('✅ Set last_update_id to: ' + lastUpdate.update_id);
   }
@@ -1185,20 +1185,20 @@ function resetBot() {
  * عرض حالة البوت
  */
 function botStatus() {
-  const props = PropertiesService.getScriptProperties();
-  const lastId = props.getProperty(LAST_UPDATE_KEY);
+  var props = PropertiesService.getScriptProperties();
+  var lastId = props.getProperty(LAST_UPDATE_KEY);
 
   // جلب التحديثات المعلقة
-  const url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/getUpdates';
-  const response = UrlFetchApp.fetch(url, {
+  var url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/getUpdates';
+  var response = UrlFetchApp.fetch(url, {
     method: 'POST',
     contentType: 'application/json',
     payload: JSON.stringify({ offset: lastId ? parseInt(lastId) + 1 : 0, limit: 100 }),
     muteHttpExceptions: true
   });
 
-  const result = JSON.parse(response.getContentText());
-  const pendingCount = result.ok ? result.result.length : 0;
+  var result = JSON.parse(response.getContentText());
+  var pendingCount = result.ok ? result.result.length : 0;
 
   Logger.log('=== Bot Status ===');
   Logger.log('Last Update ID: ' + (lastId || 'none'));
@@ -1216,8 +1216,8 @@ function botStatus() {
  * هذا ضروري لأن Webhook يمنع getUpdates من العمل
  */
 function deleteWebhook() {
-  const url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/deleteWebhook';
-  const response = UrlFetchApp.fetch(url, {
+  var url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/deleteWebhook';
+  var response = UrlFetchApp.fetch(url, {
     method: 'POST',
     contentType: 'application/json',
     payload: JSON.stringify({ drop_pending_updates: false }),
@@ -1226,7 +1226,7 @@ function deleteWebhook() {
 
   Logger.log('🗑️ Delete Webhook Response: ' + response.getContentText());
 
-  const result = JSON.parse(response.getContentText());
+  var result = JSON.parse(response.getContentText());
   if (result.ok) {
     Logger.log('✅ Webhook deleted successfully!');
     sendMessage(786700586, '✅ *تم حذف الـ Webhook!*\n\nالآن شغّل `resetBot` ثم أرسل رسالة.');
@@ -1241,8 +1241,8 @@ function deleteWebhook() {
  * عرض معلومات الـ Webhook الحالي
  */
 function getWebhookInfo() {
-  const url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/getWebhookInfo';
-  const response = UrlFetchApp.fetch(url, {
+  var url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/getWebhookInfo';
+  var response = UrlFetchApp.fetch(url, {
     method: 'GET',
     muteHttpExceptions: true
   });
@@ -1264,15 +1264,15 @@ function fullSetup() {
   Utilities.sleep(1000);
 
   // 3. إعادة تعيين
-  const props = PropertiesService.getScriptProperties();
+  var props = PropertiesService.getScriptProperties();
   props.deleteProperty(LAST_UPDATE_KEY);
 
   // 4. إنشاء الـ Trigger
   createPollingTrigger();
 
   // 5. فحص مفتاح Gemini
-  const apiKey = CONFIG.GEMINI_API_KEY;
-  const geminiStatus = (apiKey && apiKey.length > 10) ? '✅' : '❌';
+  var apiKey = CONFIG.GEMINI_API_KEY;
+  var geminiStatus = (apiKey && apiKey.length > 10) ? '✅' : '❌';
 
   // 6. إرسال رسالة
   sendMessage(786700586, '🎉 *تم الإعداد الكامل!*\n\n✅ Webhook محذوف\n✅ Trigger مُفعّل\n' + geminiStatus + ' Gemini API Key\n\nأرسل /start لظهور القائمة!');
@@ -1285,7 +1285,7 @@ function fullSetup() {
  * ⭐ فحص مفتاح Gemini API
  */
 function testGeminiKey() {
-  const apiKey = CONFIG.GEMINI_API_KEY;
+  var apiKey = CONFIG.GEMINI_API_KEY;
 
   if (!apiKey || apiKey.length < 10) {
     Logger.log('❌ Gemini API Key غير موجود في Script Properties!');
@@ -1297,20 +1297,20 @@ function testGeminiKey() {
 
   // اختبار بسيط
   try {
-    const apiUrl = CONFIG.GEMINI_API_URL + '?key=' + apiKey;
-    const payload = {
+    var apiUrl = CONFIG.GEMINI_API_URL + '?key=' + apiKey;
+    var payload = {
       contents: [{ parts: [{ text: 'قل مرحبا' }] }],
       generationConfig: { maxOutputTokens: 50 }
     };
 
-    const response = UrlFetchApp.fetch(apiUrl, {
+    var response = UrlFetchApp.fetch(apiUrl, {
       method: 'POST',
       contentType: 'application/json',
       payload: JSON.stringify(payload),
       muteHttpExceptions: true
     });
 
-    const code = response.getResponseCode();
+    var code = response.getResponseCode();
     Logger.log('Response Code: ' + code);
 
     if (code === 200) {
