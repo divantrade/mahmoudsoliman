@@ -1,7 +1,7 @@
 /**
  * =====================================================
- * نظام محمود المحاسبي - Telegram Polling
- * بديل للـ Webhook - يعمل مع Google Apps Script
+ * نظام محمود المحاسبي - Telegram Polling (Enhanced)
+ * فحص كل 10 ثواني بدلاً من كل دقيقة
  * =====================================================
  */
 
@@ -9,31 +9,46 @@
 const LAST_UPDATE_KEY = 'last_update_id';
 
 /**
- * الدالة الرئيسية للفحص الدوري
- * يتم تشغيلها كل دقيقة عبر Trigger
+ * الدالة الرئيسية للفحص الدوري المحسّن
+ * تفحص الرسائل 5 مرات خلال 50 ثانية
  */
 function checkForUpdates() {
-  try {
-    const lastUpdateId = getLastUpdateId();
-    const updates = getUpdates(lastUpdateId);
+  const CHECK_INTERVAL = 10000; // 10 ثواني
+  const MAX_CHECKS = 5;         // 5 مرات = 50 ثانية
 
-    if (updates && updates.length > 0) {
-      Logger.log('Found ' + updates.length + ' new updates');
+  for (let i = 0; i < MAX_CHECKS; i++) {
+    try {
+      Logger.log(`Check #${i + 1} at ${new Date().toLocaleTimeString()}`);
 
-      updates.forEach(update => {
-        processUpdate(update);
-        saveLastUpdateId(update.update_id);
-      });
+      const lastUpdateId = getLastUpdateId();
+      const updates = getUpdates(lastUpdateId);
+
+      if (updates && updates.length > 0) {
+        Logger.log('Found ' + updates.length + ' new updates');
+
+        updates.forEach(update => {
+          try {
+            processUpdate(update);
+          } catch (e) {
+            Logger.log('Error processing update: ' + e.toString());
+          }
+          saveLastUpdateId(update.update_id);
+        });
+      }
+
+      // انتظر 10 ثواني قبل الفحص التالي (إلا إذا كان آخر فحص)
+      if (i < MAX_CHECKS - 1) {
+        Utilities.sleep(CHECK_INTERVAL);
+      }
+
+    } catch (error) {
+      Logger.log('Error in check #' + (i + 1) + ': ' + error.toString());
     }
-  } catch (error) {
-    Logger.log('Error in checkForUpdates: ' + error.toString());
   }
 }
 
 /**
  * جلب التحديثات من Telegram
- * @param {number} offset - آخر update_id + 1
- * @returns {Array} قائمة التحديثات
  */
 function getUpdates(offset) {
   try {
@@ -68,8 +83,7 @@ function getUpdates(offset) {
 }
 
 /**
- * جلب آخر update_id من الإعدادات
- * @returns {number|null}
+ * جلب آخر update_id
  */
 function getLastUpdateId() {
   try {
@@ -83,7 +97,6 @@ function getLastUpdateId() {
 
 /**
  * حفظ آخر update_id
- * @param {number} updateId
  */
 function saveLastUpdateId(updateId) {
   try {
@@ -95,12 +108,11 @@ function saveLastUpdateId(updateId) {
 }
 
 /**
- * معالجة التحديث الوارد
- * @param {Object} update - كائن التحديث من Telegram
+ * معالجة التحديث
  */
 function processUpdate(update) {
   try {
-    Logger.log('Processing update: ' + JSON.stringify(update));
+    Logger.log('Processing update: ' + JSON.stringify(update).substring(0, 200));
 
     if (update.message) {
       handleMessage(update.message);
@@ -113,8 +125,7 @@ function processUpdate(update) {
 }
 
 /**
- * معالجة الرسالة الواردة
- * @param {Object} message - كائن الرسالة
+ * معالجة الرسالة
  */
 function handleMessage(message) {
   const chatId = message.chat.id;
@@ -123,13 +134,16 @@ function handleMessage(message) {
   const username = message.from.username || '';
   const text = message.text || '';
 
-  Logger.log('Message from ' + userName + ' (' + userId + '): ' + text);
+  Logger.log('=== New Message ===');
+  Logger.log('From: ' + userName + ' (' + userId + ')');
+  Logger.log('Text: ' + text);
 
   // التحقق من المستخدم
   let user = getUserByTelegramId(userId);
 
   // تسجيل تلقائي للـ Admin
   if (!user && userId == 786700586) {
+    Logger.log('Auto-registering admin user');
     addUser({
       telegram_id: userId.toString(),
       name: userName,
@@ -139,14 +153,23 @@ function handleMessage(message) {
     user = getUserByTelegramId(userId);
   }
 
-  // مستخدم غير مسجل
+  // مستخدم غير مسجل - نسجله تلقائياً كـ owner للتجربة
   if (!user) {
-    sendMessage(chatId,
-      `⚠️ عذراً، أنت غير مسجل في النظام.\n\n` +
-      `تواصل مع المسؤول لإضافتك.\n\n` +
-      `🆔 Your Telegram ID: \`${userId}\``
-    );
-    return;
+    Logger.log('Registering new user: ' + userName);
+    addUser({
+      telegram_id: userId.toString(),
+      name: userName,
+      username: username,
+      role: ROLES.OWNER  // صلاحيات كاملة للتجربة
+    });
+    user = getUserByTelegramId(userId);
+
+    if (!user) {
+      sendMessage(chatId,
+        `⚠️ حدث خطأ في التسجيل.\n\n🆔 Your ID: \`${userId}\``
+      );
+      return;
+    }
   }
 
   // مستخدم معطل
@@ -173,6 +196,7 @@ function handleMessage(message) {
  */
 function handleCommand(chatId, text, user) {
   const command = text.split(' ')[0].toLowerCase();
+  Logger.log('Command: ' + command);
 
   switch (command) {
     case '/start':
@@ -281,14 +305,17 @@ function handleCommand(chatId, text, user) {
 }
 
 /**
- * معالجة رسائل المستخدم العادية بالذكاء الاصطناعي
+ * معالجة رسائل المستخدم بالذكاء الاصطناعي
  */
 function processUserMessage(chatId, text, user) {
+  Logger.log('Processing with AI: ' + text);
+
   // إرسال حالة "يكتب"
   sendChatAction(chatId, 'typing');
 
   // تحليل الرسالة بـ Gemini
   const parsed = parseMessageWithGemini(text, user.name);
+  Logger.log('Gemini response: ' + JSON.stringify(parsed));
 
   if (!parsed.success) {
     if (parsed.needs_clarification) {
@@ -301,6 +328,7 @@ function processUserMessage(chatId, text, user) {
 
   // معالجة كل معاملة
   let successCount = 0;
+  let responseMessages = [];
 
   if (parsed.transactions && parsed.transactions.length > 0) {
     parsed.transactions.forEach(trans => {
@@ -345,13 +373,24 @@ function processUserMessage(chatId, text, user) {
 
       if (result && result.success) {
         successCount++;
+        // بناء رسالة التأكيد
+        const currencySymbol = trans.currency === 'EGP' ? 'ج.م' : 'ر.س';
+        responseMessages.push(`${trans.type}: ${trans.amount} ${currencySymbol}`);
       }
     });
   }
 
   // إرسال التأكيد
   if (successCount > 0) {
-    const confirmMsg = parsed.message || `✅ تم تسجيل ${successCount} معاملة بنجاح`;
+    let confirmMsg = `✅ تم تسجيل ${successCount} معاملة:\n\n`;
+    responseMessages.forEach(msg => {
+      confirmMsg += `• ${msg}\n`;
+    });
+
+    if (parsed.message) {
+      confirmMsg = parsed.message;
+    }
+
     sendMessage(chatId, confirmMsg);
 
     // إشعار المسؤول
@@ -359,33 +398,43 @@ function processUserMessage(chatId, text, user) {
       notifyAdmin(user.name, text, successCount);
     }
   } else {
-    sendMessage(chatId, '❌ لم يتم تسجيل أي معاملات. تأكد من صحة البيانات.');
+    sendMessage(chatId, '❌ لم يتم تسجيل أي معاملات. تأكد من صحة البيانات.\n\n💡 مثال: استلمت راتب 5000 ريال');
   }
 }
 
 /**
- * إرسال رسالة الترحيب
+ * إرسال رسالة الترحيب مع الأزرار
  */
 function sendWelcomeMessage(chatId, user) {
   let message = `مرحباً ${user.name}! 👋\n\n`;
   message += `🏦 *نظام حسابات محمود*\n`;
   message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
-  message += `يمكنك تسجيل معاملاتك بالكتابة الطبيعية:\n\n`;
+  message += `يمكنك تسجيل معاملاتك بالكتابة:\n\n`;
 
   message += `💰 *أمثلة:*\n`;
-  message += `• استلمت راتب 8500\n`;
+  message += `• استلمت راتب 8500 ريال\n`;
   message += `• صرفت 150 غداء\n`;
-  message += `• حولت لمراتي 3000 ريال وصلوا 4000 جنيه\n`;
+  message += `• حولت لمراتي 3000 ريال\n`;
   message += `• دفعت إيجار 2000\n\n`;
 
-  if (canViewReports(user)) {
-    message += `📊 *التقارير:* /report\n`;
-  }
+  message += `📊 للتقارير: /report\n`;
+  message += `❓ للمساعدة: /help`;
 
-  message += `\n❓ *المساعدة:* /help`;
+  // أزرار سريعة
+  const keyboard = {
+    inline_keyboard: [
+      [
+        { text: '📊 التقارير', callback_data: 'menu_reports' },
+        { text: '💰 الرصيد', callback_data: 'report_balance' }
+      ],
+      [
+        { text: '❓ المساعدة', callback_data: 'menu_help' }
+      ]
+    ]
+  };
 
-  sendMessage(chatId, message);
+  sendMessage(chatId, message, keyboard);
 }
 
 /**
@@ -395,35 +444,31 @@ function sendHelpMessage(chatId, user) {
   let message = `📖 *دليل الاستخدام*\n`;
   message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
-  message += `*تسجيل الدخل:*\n`;
+  message += `*💵 تسجيل الدخل:*\n`;
   message += `• نزل الراتب 8500\n`;
   message += `• استلمت عمولة 1200\n\n`;
 
-  message += `*تسجيل المصروفات:*\n`;
+  message += `*💸 تسجيل المصروفات:*\n`;
   message += `• صرفت 150 غداء\n`;
-  message += `• دفعت الإيجار 2000\n\n`;
+  message += `• دفعت الإيجار 2000\n`;
+  message += `• فاتورة الكهرباء 300\n\n`;
 
-  message += `*التحويلات:*\n`;
+  message += `*📤 التحويلات:*\n`;
   message += `• حولت لمراتي 3000 ريال وصلوا 4000 جنيه\n`;
   message += `• ساعدت مصطفى بـ 1000 جنيه\n\n`;
 
-  message += `*الذهب:*\n`;
+  message += `*💍 الذهب:*\n`;
   message += `• اشترت سارة 10 جرام عيار 21\n\n`;
 
-  message += `*الجمعيات:*\n`;
+  message += `*🔄 الجمعيات:*\n`;
   message += `• دفعت جمعية 5000 جنيه\n\n`;
 
   if (canViewReports(user)) {
     message += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    message += `*التقارير:*\n`;
-    message += `/monthly - الشهري\n`;
-    message += `/wife - الزوجة\n`;
-    message += `/siblings - الإخوة\n`;
-    message += `/gold - الذهب\n`;
-    message += `/associations - الجمعيات\n`;
-    message += `/savings - المدخرات\n`;
-    message += `/loans - السلف\n`;
+    message += `*📊 أوامر التقارير:*\n`;
+    message += `/report - قائمة التقارير\n`;
     message += `/balance - الرصيد\n`;
+    message += `/monthly - الشهري\n`;
   }
 
   sendMessage(chatId, message);
@@ -437,17 +482,18 @@ function sendReportMenu(chatId) {
     inline_keyboard: [
       [
         { text: '📊 الشهري', callback_data: 'report_monthly' },
-        { text: '💕 الزوجة', callback_data: 'report_wife' }
+        { text: '💰 الرصيد', callback_data: 'report_balance' }
       ],
       [
-        { text: '👨‍👩‍👧‍👦 الإخوة', callback_data: 'report_siblings' },
-        { text: '💍 الذهب', callback_data: 'report_gold' }
+        { text: '💕 الزوجة', callback_data: 'report_wife' },
+        { text: '👨‍👩‍👧‍👦 الإخوة', callback_data: 'report_siblings' }
       ],
       [
-        { text: '🔄 الجمعيات', callback_data: 'report_associations' },
-        { text: '🏦 المدخرات', callback_data: 'report_savings' }
+        { text: '💍 الذهب', callback_data: 'report_gold' },
+        { text: '🔄 الجمعيات', callback_data: 'report_associations' }
       ],
       [
+        { text: '🏦 المدخرات', callback_data: 'report_savings' },
         { text: '💳 السلف', callback_data: 'report_loans' }
       ]
     ]
@@ -464,40 +510,78 @@ function handleCallbackQuery(callbackQuery) {
   const userId = callbackQuery.from.id;
   const data = callbackQuery.data;
 
+  Logger.log('Callback: ' + data);
+
   const user = getUserByTelegramId(userId);
-  if (!user || !canViewReports(user)) {
-    answerCallbackQuery(callbackQuery.id, '⚠️ ليس لديك صلاحية');
+  if (!user) {
+    answerCallbackQuery(callbackQuery.id, '⚠️ يرجى إرسال /start أولاً');
     return;
   }
 
-  let report = '';
-
+  // معالجة الأزرار
   switch (data) {
-    case 'report_monthly':
-      report = generateMonthlySummary();
+    case 'menu_reports':
+      sendReportMenu(chatId);
       break;
-    case 'report_wife':
-      report = generateWifeReport();
-      break;
-    case 'report_siblings':
-      report = generateSiblingsReport();
-      break;
-    case 'report_gold':
-      report = generateGoldReport();
-      break;
-    case 'report_associations':
-      report = generateAssociationsReport();
-      break;
-    case 'report_savings':
-      report = generateSavingsReport();
-      break;
-    case 'report_loans':
-      report = generateLoansReport();
-      break;
-  }
 
-  if (report) {
-    sendMessage(chatId, report);
+    case 'menu_help':
+      sendHelpMessage(chatId, user);
+      break;
+
+    case 'report_balance':
+      sendBalanceSummary(chatId);
+      break;
+
+    case 'report_monthly':
+      if (canViewReports(user)) {
+        const report = generateMonthlySummary();
+        sendMessage(chatId, report);
+      } else {
+        sendMessage(chatId, '⚠️ ليس لديك صلاحية');
+      }
+      break;
+
+    case 'report_wife':
+      if (canViewReports(user)) {
+        const report = generateWifeReport();
+        sendMessage(chatId, report);
+      }
+      break;
+
+    case 'report_siblings':
+      if (canViewReports(user)) {
+        const report = generateSiblingsReport();
+        sendMessage(chatId, report);
+      }
+      break;
+
+    case 'report_gold':
+      if (canViewReports(user)) {
+        const report = generateGoldReport();
+        sendMessage(chatId, report);
+      }
+      break;
+
+    case 'report_associations':
+      if (canViewReports(user)) {
+        const report = generateAssociationsReport();
+        sendMessage(chatId, report);
+      }
+      break;
+
+    case 'report_savings':
+      if (canViewReports(user)) {
+        const report = generateSavingsReport();
+        sendMessage(chatId, report);
+      }
+      break;
+
+    case 'report_loans':
+      if (canViewReports(user)) {
+        const report = generateLoansReport();
+        sendMessage(chatId, report);
+      }
+      break;
   }
 
   answerCallbackQuery(callbackQuery.id);
@@ -528,21 +612,22 @@ function sendBalanceSummary(chatId) {
 
     let message = `💰 *ملخص الرصيد*\n`;
     message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
-    message += `📥 إجمالي الدخل: ${formatNumber(totalIncome)} ر.س\n`;
-    message += `📤 إجمالي المصروفات: ${formatNumber(totalExpense)} ر.س\n`;
-    message += `💸 إجمالي التحويلات: ${formatNumber(totalTransfer)} ر.س\n\n`;
+    message += `📥 الدخل: ${formatNumber(totalIncome)} ر.س\n`;
+    message += `📤 المصروفات: ${formatNumber(totalExpense)} ر.س\n`;
+    message += `💸 التحويلات: ${formatNumber(totalTransfer)} ر.س\n\n`;
     message += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    message += `💵 *الرصيد المتاح:* ${formatNumber(balance)} ر.س`;
+    message += `💵 *الرصيد:* ${formatNumber(balance)} ر.س`;
 
     sendMessage(chatId, message);
 
   } catch (error) {
+    Logger.log('Error in balance: ' + error.toString());
     sendMessage(chatId, '❌ حدث خطأ في حساب الرصيد');
   }
 }
 
 /**
- * التحقق من صلاحية عرض التقارير
+ * التحقق من صلاحية التقارير
  */
 function canViewReports(user) {
   return user.role === ROLES.ADMIN ||
@@ -560,7 +645,7 @@ function notifyAdmin(userName, message, count) {
 }
 
 /**
- * إرسال رسالة عبر Telegram
+ * إرسال رسالة
  */
 function sendMessage(chatId, text, replyMarkup) {
   try {
@@ -584,7 +669,7 @@ function sendMessage(chatId, text, replyMarkup) {
     };
 
     const response = UrlFetchApp.fetch(url, options);
-    Logger.log('Send message response: ' + response.getContentText());
+    Logger.log('Message sent: ' + response.getContentText().substring(0, 100));
 
   } catch (error) {
     Logger.log('Error sending message: ' + error.toString());
@@ -618,7 +703,7 @@ function sendChatAction(chatId, action) {
 }
 
 /**
- * الرد على استعلام الزر
+ * الرد على الزر
  */
 function answerCallbackQuery(callbackQueryId, text) {
   try {
@@ -648,7 +733,6 @@ function answerCallbackQuery(callbackQueryId, text) {
 
 /**
  * إنشاء Trigger للفحص الدوري
- * شغّل هذه الدالة مرة واحدة فقط
  */
 function createPollingTrigger() {
   // حذف التريجرات القديمة
@@ -659,18 +743,18 @@ function createPollingTrigger() {
     }
   });
 
-  // إنشاء تريجر جديد - كل دقيقة
+  // إنشاء تريجر جديد - كل دقيقة (سيفحص 5 مرات داخلياً)
   ScriptApp.newTrigger('checkForUpdates')
     .timeBased()
     .everyMinutes(1)
     .create();
 
-  Logger.log('✅ Polling trigger created successfully!');
-  return 'تم إنشاء الفحص الدوري بنجاح! البوت سيفحص الرسائل كل دقيقة.';
+  Logger.log('✅ Enhanced polling trigger created! (checks every ~10 seconds)');
+  return 'تم إنشاء الفحص المحسّن! البوت سيفحص كل ~10 ثواني';
 }
 
 /**
- * إيقاف الفحص الدوري
+ * إيقاف الفحص
  */
 function stopPolling() {
   const triggers = ScriptApp.getProjectTriggers();
@@ -691,13 +775,18 @@ function stopPolling() {
  * اختبار إرسال رسالة
  */
 function testSendMessage() {
-  const chatId = 786700586; // Adel's ID
-  sendMessage(chatId, '✅ *البوت يعمل بنجاح!*\n\nنظام حسابات محمود جاهز للاستخدام.\n\nأرسل /start للبدء.');
+  const chatId = 786700586;
+  sendMessage(chatId,
+    '✅ *البوت يعمل بنجاح!*\n\n' +
+    'نظام حسابات محمود جاهز.\n\n' +
+    '⚡ الفحص كل ~10 ثواني\n\n' +
+    'أرسل /start للبدء.'
+  );
   return 'تم إرسال رسالة الاختبار';
 }
 
 /**
- * فحص يدوي للرسائل
+ * فحص يدوي
  */
 function manualCheck() {
   checkForUpdates();
