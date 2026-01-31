@@ -226,3 +226,39 @@ function backupData() {
   // TODO: Implement backup
   return 'هذه الميزة قيد التطوير';
 }
+
+/**
+ * =====================================================
+ * IMPORTANT: Use these functions instead of Webhook
+ * =====================================================
+ */
+
+/**
+ * Step 1: Run this first to set up polling
+ */
+function setupBot() {
+  // Initialize sheets
+  initializeAllSheets();
+
+  // Create polling trigger
+  createPollingTrigger();
+
+  // Send test message
+  testSendMessage();
+
+  return '✅ تم إعداد البوت بنجاح!';
+}
+
+/**
+ * Step 2: Test if bot can send messages
+ */
+function testBotConnection() {
+  return testSendMessage();
+}
+
+/**
+ * Step 3: Manual check for messages (for testing)
+ */
+function checkMessages() {
+  return manualCheck();
+}
