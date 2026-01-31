@@ -1,0 +1,474 @@
+/**
+ * =====================================================
+ * نظام محمود المحاسبي - Sheets Manager
+ * =====================================================
+ */
+
+/**
+ * Get or create the main spreadsheet
+ * @returns {Spreadsheet} The spreadsheet object
+ */
+function getSpreadsheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) {
+    throw new Error('لم يتم العثور على الـ Spreadsheet. تأكد من ربط السكريبت بـ Google Sheet.');
+  }
+  return ss;
+}
+
+/**
+ * Get or create a sheet by name
+ * @param {string} sheetName - Name of the sheet
+ * @returns {Sheet} The sheet object
+ */
+function getOrCreateSheet(sheetName) {
+  const ss = getSpreadsheet();
+  let sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+    initializeSheet(sheet, sheetName);
+  }
+
+  return sheet;
+}
+
+/**
+ * Initialize sheet with headers based on type
+ * @param {Sheet} sheet - The sheet to initialize
+ * @param {string} sheetName - Name of the sheet
+ */
+function initializeSheet(sheet, sheetName) {
+  const headers = getSheetHeaders(sheetName);
+  if (headers.length > 0) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.getRange(1, 1, 1, headers.length)
+      .setBackground('#4a86e8')
+      .setFontColor('white')
+      .setFontWeight('bold');
+    sheet.setFrozenRows(1);
+  }
+}
+
+/**
+ * Get headers for each sheet type
+ * @param {string} sheetName - Name of the sheet
+ * @returns {Array} Array of header strings
+ */
+function getSheetHeaders(sheetName) {
+  const headersMap = {
+    'المستخدمين': [
+      'ID', 'Telegram_ID', 'الاسم', 'اسم_المستخدم', 'الصلاحية', 'نشط',
+      'تاريخ_الإضافة', 'آخر_نشاط', 'ملاحظات'
+    ],
+    'الحركات': [
+      'ID', 'التاريخ', 'الوقت', 'النوع', 'التصنيف', 'المبلغ', 'العملة',
+      'المبلغ_المستلم', 'عملة_الاستلام', 'سعر_الصرف', 'جهة_الاتصال',
+      'الوصف', 'المستخدم', 'Telegram_ID', 'ملاحظات'
+    ],
+    'التصنيفات': [
+      'الكود', 'الاسم', 'النوع', 'العملة', 'نشط'
+    ],
+    'جهات_الاتصال': [
+      'الكود', 'الاسم', 'العلاقة', 'الأسماء_البديلة', 'العملة', 'Telegram_ID', 'نشط'
+    ],
+    'الجمعيات': [
+      'ID', 'الاسم', 'قيمة_القسط', 'عدد_الأشهر', 'تاريخ_البدء', 'ترتيب_القبض',
+      'تاريخ_القبض_المتوقع', 'المسؤول', 'الحالة', 'ملاحظات'
+    ],
+    'الذهب': [
+      'ID', 'التاريخ', 'الوزن_جرام', 'العيار', 'السعر', 'العملة',
+      'المشتري', 'البائع', 'الوصف', 'ملاحظات'
+    ],
+    'السلف': [
+      'ID', 'التاريخ', 'النوع', 'الشخص', 'المبلغ', 'العملة',
+      'المبلغ_المتبقي', 'الحالة', 'ملاحظات'
+    ],
+    'سعر_الصرف': [
+      'التاريخ', 'من_عملة', 'إلى_عملة', 'السعر', 'ملاحظات'
+    ],
+    'الإعدادات': [
+      'المفتاح', 'القيمة', 'الوصف'
+    ]
+  };
+
+  return headersMap[sheetName] || [];
+}
+
+/**
+ * Initialize all sheets
+ */
+function initializeAllSheets() {
+  const sheetNames = Object.values(SHEETS);
+
+  sheetNames.forEach(sheetName => {
+    getOrCreateSheet(sheetName);
+  });
+
+  // Add default data
+  addDefaultCategories();
+  addDefaultContacts();
+  addDefaultSettings();
+
+  return 'تم إنشاء جميع الشيتات بنجاح!';
+}
+
+/**
+ * Add default categories
+ */
+function addDefaultCategories() {
+  const sheet = getOrCreateSheet(SHEETS.CATEGORIES);
+  const existingData = sheet.getDataRange().getValues();
+
+  if (existingData.length <= 1) {
+    const rows = [];
+
+    DEFAULT_CATEGORIES.income.forEach(cat => {
+      rows.push([cat.code, cat.nameAr, 'دخل', 'SAR', 'نعم']);
+    });
+
+    DEFAULT_CATEGORIES.expense_sar.forEach(cat => {
+      rows.push([cat.code, cat.nameAr, 'مصروف', 'SAR', 'نعم']);
+    });
+
+    DEFAULT_CATEGORIES.expense_egp.forEach(cat => {
+      rows.push([cat.code, cat.nameAr, 'تحويل', 'EGP', 'نعم']);
+    });
+
+    if (rows.length > 0) {
+      sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+    }
+  }
+}
+
+/**
+ * Add default contacts (family members)
+ */
+function addDefaultContacts() {
+  const sheet = getOrCreateSheet(SHEETS.CONTACTS);
+  const existingData = sheet.getDataRange().getValues();
+
+  if (existingData.length <= 1) {
+    const rows = FAMILY_CONTACTS.map(contact => [
+      contact.code,
+      contact.name,
+      contact.relation,
+      contact.aliases.join('، '),
+      contact.currency,
+      '',  // Telegram ID
+      'نعم'
+    ]);
+
+    if (rows.length > 0) {
+      sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+    }
+  }
+}
+
+/**
+ * Add default settings
+ */
+function addDefaultSettings() {
+  const sheet = getOrCreateSheet(SHEETS.SETTINGS);
+  const existingData = sheet.getDataRange().getValues();
+
+  if (existingData.length <= 1) {
+    const settings = [
+      ['default_exchange_rate', '13.5', 'سعر الصرف الافتراضي (ريال إلى جنيه)'],
+      ['notification_before_association', '3', 'عدد أيام التنبيه قبل موعد الجمعية'],
+      ['weekly_report_day', 'friday', 'يوم إرسال التقرير الأسبوعي'],
+      ['monthly_report_day', '1', 'يوم إرسال التقرير الشهري']
+    ];
+
+    sheet.getRange(2, 1, settings.length, settings[0].length).setValues(settings);
+  }
+}
+
+/**
+ * Add a new transaction
+ * @param {Object} transaction - Transaction data
+ * @returns {Object} Result with success status and message
+ */
+function addTransaction(transaction) {
+  try {
+    const sheet = getOrCreateSheet(SHEETS.TRANSACTIONS);
+    const lastRow = sheet.getLastRow();
+    const newId = lastRow; // Simple ID generation
+
+    const now = new Date();
+    const row = [
+      newId,
+      Utilities.formatDate(now, 'Asia/Riyadh', 'yyyy-MM-dd'),
+      Utilities.formatDate(now, 'Asia/Riyadh', 'HH:mm:ss'),
+      transaction.type || '',
+      transaction.category || '',
+      transaction.amount || 0,
+      transaction.currency || 'SAR',
+      transaction.amount_received || '',
+      transaction.currency_received || '',
+      transaction.exchange_rate || '',
+      transaction.contact || '',
+      transaction.description || '',
+      transaction.user_name || '',
+      transaction.telegram_id || '',
+      transaction.notes || ''
+    ];
+
+    sheet.appendRow(row);
+
+    return {
+      success: true,
+      message: 'تم تسجيل المعاملة بنجاح',
+      id: newId
+    };
+
+  } catch (error) {
+    Logger.log('Error in addTransaction: ' + error.toString());
+    return {
+      success: false,
+      message: 'حدث خطأ أثناء تسجيل المعاملة: ' + error.message
+    };
+  }
+}
+
+/**
+ * Add gold purchase
+ * @param {Object} goldData - Gold purchase data
+ */
+function addGoldPurchase(goldData) {
+  try {
+    const sheet = getOrCreateSheet(SHEETS.GOLD);
+    const lastRow = sheet.getLastRow();
+    const newId = lastRow;
+
+    const now = new Date();
+    const row = [
+      newId,
+      Utilities.formatDate(now, 'Asia/Riyadh', 'yyyy-MM-dd'),
+      goldData.weight || 0,
+      goldData.karat || 21,
+      goldData.price || 0,
+      goldData.currency || 'EGP',
+      goldData.buyer || '',
+      goldData.seller || '',
+      goldData.description || '',
+      goldData.notes || ''
+    ];
+
+    sheet.appendRow(row);
+
+    return { success: true, message: 'تم تسجيل شراء الذهب', id: newId };
+
+  } catch (error) {
+    return { success: false, message: error.message };
+  }
+}
+
+/**
+ * Add or update loan record
+ * @param {Object} loanData - Loan data
+ */
+function addLoanRecord(loanData) {
+  try {
+    const sheet = getOrCreateSheet(SHEETS.LOANS);
+    const lastRow = sheet.getLastRow();
+    const newId = lastRow;
+
+    const now = new Date();
+    const row = [
+      newId,
+      Utilities.formatDate(now, 'Asia/Riyadh', 'yyyy-MM-dd'),
+      loanData.type || '',
+      loanData.person || '',
+      loanData.amount || 0,
+      loanData.currency || 'SAR',
+      loanData.amount || 0, // remaining amount
+      'نشط',
+      loanData.notes || ''
+    ];
+
+    sheet.appendRow(row);
+
+    return { success: true, message: 'تم تسجيل السلفة', id: newId };
+
+  } catch (error) {
+    return { success: false, message: error.message };
+  }
+}
+
+/**
+ * Get user by Telegram ID
+ * @param {string} telegramId - Telegram user ID
+ * @returns {Object|null} User data or null
+ */
+function getUserByTelegramId(telegramId) {
+  try {
+    const sheet = getOrCreateSheet(SHEETS.USERS);
+    const data = sheet.getDataRange().getValues();
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][1] == telegramId) {
+        return {
+          id: data[i][0],
+          telegram_id: data[i][1],
+          name: data[i][2],
+          username: data[i][3],
+          role: data[i][4],
+          active: data[i][5] === 'نعم',
+          created_at: data[i][6],
+          last_activity: data[i][7]
+        };
+      }
+    }
+
+    return null;
+
+  } catch (error) {
+    Logger.log('Error in getUserByTelegramId: ' + error.toString());
+    return null;
+  }
+}
+
+/**
+ * Add new user
+ * @param {Object} userData - User data
+ */
+function addUser(userData) {
+  try {
+    const sheet = getOrCreateSheet(SHEETS.USERS);
+    const lastRow = sheet.getLastRow();
+    const newId = lastRow;
+
+    const now = new Date();
+    const row = [
+      newId,
+      userData.telegram_id || '',
+      userData.name || '',
+      userData.username || '',
+      userData.role || ROLES.LIMITED,
+      'نعم',
+      Utilities.formatDate(now, 'Asia/Riyadh', 'yyyy-MM-dd HH:mm:ss'),
+      Utilities.formatDate(now, 'Asia/Riyadh', 'yyyy-MM-dd HH:mm:ss'),
+      userData.notes || ''
+    ];
+
+    sheet.appendRow(row);
+
+    return { success: true, message: 'تم إضافة المستخدم', id: newId };
+
+  } catch (error) {
+    return { success: false, message: error.message };
+  }
+}
+
+/**
+ * Update user last activity
+ * @param {string} telegramId - Telegram user ID
+ */
+function updateUserActivity(telegramId) {
+  try {
+    const sheet = getOrCreateSheet(SHEETS.USERS);
+    const data = sheet.getDataRange().getValues();
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][1] == telegramId) {
+        const now = new Date();
+        sheet.getRange(i + 1, 8).setValue(
+          Utilities.formatDate(now, 'Asia/Riyadh', 'yyyy-MM-dd HH:mm:ss')
+        );
+        break;
+      }
+    }
+
+  } catch (error) {
+    Logger.log('Error updating user activity: ' + error.toString());
+  }
+}
+
+/**
+ * Get setting value
+ * @param {string} key - Setting key
+ * @returns {string} Setting value
+ */
+function getSetting(key) {
+  try {
+    const sheet = getOrCreateSheet(SHEETS.SETTINGS);
+    const data = sheet.getDataRange().getValues();
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === key) {
+        return data[i][1];
+      }
+    }
+
+    return null;
+
+  } catch (error) {
+    Logger.log('Error getting setting: ' + error.toString());
+    return null;
+  }
+}
+
+/**
+ * Get contact by alias
+ * @param {string} alias - Contact alias
+ * @returns {Object|null} Contact data
+ */
+function getContactByAlias(alias) {
+  try {
+    const sheet = getOrCreateSheet(SHEETS.CONTACTS);
+    const data = sheet.getDataRange().getValues();
+
+    const normalizedAlias = alias.toLowerCase().trim();
+
+    for (let i = 1; i < data.length; i++) {
+      const aliases = data[i][3].split('،').map(a => a.trim().toLowerCase());
+      const code = data[i][0].toLowerCase();
+      const name = data[i][1].toLowerCase();
+
+      if (code === normalizedAlias ||
+        name.includes(normalizedAlias) ||
+        aliases.includes(normalizedAlias)) {
+        return {
+          code: data[i][0],
+          name: data[i][1],
+          relation: data[i][2],
+          aliases: aliases,
+          currency: data[i][4],
+          telegram_id: data[i][5],
+          active: data[i][6] === 'نعم'
+        };
+      }
+    }
+
+    return null;
+
+  } catch (error) {
+    Logger.log('Error getting contact: ' + error.toString());
+    return null;
+  }
+}
+
+/**
+ * Record exchange rate
+ * @param {number} rate - Exchange rate
+ * @param {string} from - From currency
+ * @param {string} to - To currency
+ */
+function recordExchangeRate(rate, from, to) {
+  try {
+    const sheet = getOrCreateSheet(SHEETS.EXCHANGE_RATES);
+    const now = new Date();
+
+    sheet.appendRow([
+      Utilities.formatDate(now, 'Asia/Riyadh', 'yyyy-MM-dd'),
+      from || 'SAR',
+      to || 'EGP',
+      rate,
+      ''
+    ]);
+
+  } catch (error) {
+    Logger.log('Error recording exchange rate: ' + error.toString());
+  }
+}
