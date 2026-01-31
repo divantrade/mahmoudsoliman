@@ -12,10 +12,17 @@ const PENDING_TRANS_PREFIX = 'pending_trans_';
  * ⭐ حفظ معاملة معلقة للمراجعة
  */
 function savePendingTransaction(chatId, transactionData) {
-  var cache = CacheService.getScriptCache();
-  var key = PENDING_TRANS_PREFIX + chatId;
-  cache.put(key, JSON.stringify(transactionData), 300); // 5 دقائق
-  Logger.log('Saved pending transaction for chat ' + chatId);
+  try {
+    var cache = CacheService.getScriptCache();
+    var key = PENDING_TRANS_PREFIX + chatId;
+    var jsonData = JSON.stringify(transactionData);
+    cache.put(key, jsonData, 300); // 5 دقائق
+    Logger.log('Saved pending transaction for chat ' + chatId + ', size: ' + jsonData.length);
+    return true;
+  } catch (e) {
+    Logger.log('ERROR in savePendingTransaction: ' + e.toString());
+    return false;
+  }
 }
 
 /**
@@ -85,11 +92,17 @@ function sendPreviewWithButtons(chatId, transactions, user) {
   var previewMsg = buildPreviewMessage(transactions);
 
   // حفظ المعاملات المعلقة
-  savePendingTransaction(chatId, {
+  var saved = savePendingTransaction(chatId, {
     transactions: transactions,
     user: user,
     timestamp: new Date().getTime()
   });
+
+  if (!saved) {
+    // فشل الحفظ في الكاش - نحفظ مباشرة
+    Logger.log('Cache save failed, saving directly');
+    throw new Error('فشل حفظ المعاملة في الكاش');
+  }
 
   // أزرار التأكيد والإلغاء
   var keyboard = {
@@ -536,8 +549,26 @@ function processCustodyDirectly(chatId, text, user) {
     };
     Logger.log('Transaction data: ' + JSON.stringify(transData));
 
-    // ⭐⭐⭐ إرسال نموذج المراجعة بدلاً من الحفظ المباشر ⭐⭐⭐
-    sendPreviewWithButtons(chatId, [transData], user);
+    // ⭐⭐⭐ إرسال نموذج المراجعة - مع fallback للحفظ المباشر ⭐⭐⭐
+    try {
+      sendPreviewWithButtons(chatId, [transData], user);
+    } catch (previewError) {
+      Logger.log('Preview error, falling back to direct save: ' + previewError.toString());
+      // Fallback: حفظ مباشر
+      var result = addTransaction(transData);
+      if (result && result.success) {
+        var msg = '✅ تم تسجيل عهدة ' + custodian + ':\n\n';
+        msg += '🔢 رقم الحركة: #' + result.id + '\n';
+        msg += '💰 المبلغ: ' + amount + ' ' + currency;
+        if (amountReceived && exchangeRate) {
+          msg += '\n📥 المستلم: ' + amountReceived + ' ' + currencyReceived;
+          msg += '\n💱 سعر الصرف: ' + exchangeRate;
+        }
+        sendMessage(chatId, msg);
+      } else {
+        sendMessage(chatId, '❌ فشل تسجيل العهدة');
+      }
+    }
 
   } catch (error) {
     Logger.log('EXCEPTION in processCustodyDirectly: ' + error.toString());
@@ -632,8 +663,28 @@ function processUserMessage(chatId, text, user) {
         processedTransactions.push(transData);
       }
 
-      // ⭐⭐⭐ إرسال نموذج المراجعة بدلاً من الحفظ المباشر ⭐⭐⭐
-      sendPreviewWithButtons(chatId, processedTransactions, user);
+      // ⭐⭐⭐ إرسال نموذج المراجعة - مع fallback للحفظ المباشر ⭐⭐⭐
+      try {
+        sendPreviewWithButtons(chatId, processedTransactions, user);
+      } catch (previewError) {
+        Logger.log('Preview error in processUserMessage, falling back: ' + previewError.toString());
+        // Fallback: حفظ مباشر
+        var successCount = 0;
+        var savedIds = [];
+        for (var j = 0; j < processedTransactions.length; j++) {
+          var result = addTransaction(processedTransactions[j]);
+          if (result && result.success) {
+            successCount++;
+            savedIds.push(result.id);
+          }
+        }
+        if (successCount > 0) {
+          var msg = '✅ تم الحفظ! رقم الحركة: #' + savedIds.join(', #');
+          sendMessage(chatId, msg);
+        } else {
+          sendMessage(chatId, '❌ فشل الحفظ');
+        }
+      }
 
     } else {
       Logger.log('No transactions found');
