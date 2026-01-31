@@ -139,11 +139,18 @@ function classifyCategory(description, type) {
     const apiKey = CONFIG.GEMINI_API_KEY;
     const apiUrl = CONFIG.GEMINI_API_URL + '?key=' + apiKey;
 
-    const categories = type === 'دخل'
-      ? DEFAULT_CATEGORIES.دخل.map(c => c.كود).join('، ')
-      : type === 'مصروف'
-        ? DEFAULT_CATEGORIES.مصروف_سعودي.map(c => c.كود).join('، ')
-        : DEFAULT_CATEGORIES.مصروف_مصر.map(c => c.كود).join('، ');
+    let categories;
+    if (type === 'دخل') {
+      categories = DEFAULT_CATEGORIES.دخل.map(c => c.كود).join('، ');
+    } else if (type === 'مصروف') {
+      categories = DEFAULT_CATEGORIES.مصروف.map(c => c.كود).join('، ');
+    } else if (type === 'تحويل') {
+      categories = DEFAULT_CATEGORIES.تحويل.map(c => c.كود).join('، ');
+    } else if (type === 'صرف_من_عهدة' || type === 'إيداع_عهدة') {
+      categories = DEFAULT_CATEGORIES.عهدة.map(c => c.كود).join('، ');
+    } else {
+      categories = DEFAULT_CATEGORIES.مصروف.map(c => c.كود).join('، ');
+    }
 
     const prompt = `صنف هذه المعاملة:
 الوصف: "${description}"
