@@ -129,10 +129,10 @@ ${JSON.stringify(context, null, 2)}
 }
 
 /**
- * Classify transaction category using AI
- * @param {string} description - Transaction description
- * @param {string} type - Transaction type
- * @returns {string} Category code
+ * تصنيف المعاملة باستخدام الذكاء الاصطناعي
+ * @param {string} description - وصف المعاملة
+ * @param {string} type - نوع المعاملة
+ * @returns {string} كود التصنيف
  */
 function classifyCategory(description, type) {
   try {
@@ -140,10 +140,10 @@ function classifyCategory(description, type) {
     const apiUrl = CONFIG.GEMINI_API_URL + '?key=' + apiKey;
 
     const categories = type === 'دخل'
-      ? DEFAULT_CATEGORIES.income.map(c => c.code).join(', ')
+      ? DEFAULT_CATEGORIES.دخل.map(c => c.كود).join('، ')
       : type === 'مصروف'
-        ? DEFAULT_CATEGORIES.expense_sar.map(c => c.code).join(', ')
-        : DEFAULT_CATEGORIES.expense_egp.map(c => c.code).join(', ');
+        ? DEFAULT_CATEGORIES.مصروف_سعودي.map(c => c.كود).join('، ')
+        : DEFAULT_CATEGORIES.مصروف_مصر.map(c => c.كود).join('، ');
 
     const prompt = `صنف هذه المعاملة:
 الوصف: "${description}"
@@ -179,6 +179,6 @@ function classifyCategory(description, type) {
 
   } catch (error) {
     Logger.log('Error in classifyCategory: ' + error.toString());
-    return 'other';
+    return 'متنوع';
   }
 }

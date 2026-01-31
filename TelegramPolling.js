@@ -273,16 +273,21 @@ function handleMenuButton(chatId, text, user) {
  * معالجة الرسائل بالذكاء الاصطناعي
  */
 function processUserMessage(chatId, text, user) {
-  Logger.log('🤖 AI Processing: ' + text);
+  Logger.log('🤖 معالجة: ' + text);
 
   sendChatAction(chatId, 'typing');
 
   try {
     const parsed = parseMessageWithGemini(text, user.name);
-    Logger.log('AI Result: ' + JSON.stringify(parsed));
+    Logger.log('نتيجة: ' + JSON.stringify(parsed));
 
-    if (!parsed || !parsed.success) {
-      const msg = (parsed && parsed.message) ? parsed.message : '❌ لم أفهم. جرب:\n\n• استلمت راتب 5000\n• صرفت 100 غداء';
+    // التحقق من النجاح (يدعم العربي والإنجليزي)
+    const isSuccess = parsed && (parsed.نجاح === true || parsed.success === true);
+    const message = parsed.رسالة || parsed.message;
+    const transactions = parsed.معاملات || parsed.transactions;
+
+    if (!isSuccess) {
+      const msg = message || '❌ لم أفهم. جرب:\n\n• استلمت راتب 5000\n• صرفت 100 غداء';
       sendMessage(chatId, msg);
       return;
     }
@@ -290,23 +295,38 @@ function processUserMessage(chatId, text, user) {
     let successCount = 0;
     const details = [];
 
-    if (parsed.transactions && parsed.transactions.length > 0) {
-      for (let i = 0; i < parsed.transactions.length; i++) {
-        const trans = parsed.transactions[i];
-        trans.user_name = user.name;
-        trans.telegram_id = user.telegram_id;
+    if (transactions && transactions.length > 0) {
+      for (let i = 0; i < transactions.length; i++) {
+        const trans = transactions[i];
 
-        if (trans.amount && trans.amount_received) {
-          trans.exchange_rate = (trans.amount_received / trans.amount).toFixed(2);
-          trans.currency_received = 'EGP';
+        // تحويل المفاتيح العربية للإنجليزية للحفظ
+        const transData = {
+          type: trans.نوع || trans.type,
+          amount: trans.مبلغ || trans.amount,
+          currency: (trans.عملة === 'ريال' || trans.currency === 'SAR') ? 'SAR' : 'EGP',
+          category: trans.تصنيف || trans.category,
+          contact: trans.جهة || trans.contact,
+          contact_name: trans.اسم_الجهة || trans.contact_name,
+          description: trans.وصف || trans.description,
+          amount_received: trans.مبلغ_مستلم || trans.amount_received,
+          gold_weight: trans.وزن_الذهب || trans.gold_weight,
+          gold_karat: trans.عيار_الذهب || trans.gold_karat,
+          user_name: user.name,
+          telegram_id: user.telegram_id
+        };
+
+        // حساب سعر الصرف للتحويلات
+        if (transData.amount && transData.amount_received) {
+          transData.exchange_rate = (transData.amount_received / transData.amount).toFixed(2);
+          transData.currency_received = 'EGP';
         }
 
-        const result = addTransaction(trans);
+        const result = addTransaction(transData);
 
         if (result && result.success) {
           successCount++;
-          const curr = (trans.currency === 'EGP') ? 'ج.م' : 'ر.س';
-          details.push(trans.type + ': ' + trans.amount + ' ' + curr);
+          const curr = (transData.currency === 'EGP') ? 'ج.م' : 'ر.س';
+          details.push(transData.type + ': ' + transData.amount + ' ' + curr);
         }
       }
     }
@@ -316,13 +336,16 @@ function processUserMessage(chatId, text, user) {
       for (let i = 0; i < details.length; i++) {
         msg += '• ' + details[i] + '\n';
       }
+      if (message) {
+        msg += '\n' + message;
+      }
       sendMessage(chatId, msg);
     } else {
       sendMessage(chatId, '❌ لم يتم التسجيل.\n\nجرب: استلمت راتب 5000 ريال');
     }
 
   } catch (error) {
-    Logger.log('AI Error: ' + error.toString());
+    Logger.log('خطأ: ' + error.toString());
     sendMessage(chatId, '❌ حدث خطأ. حاول مرة أخرى.');
   }
 }

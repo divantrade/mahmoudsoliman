@@ -114,7 +114,7 @@ function initializeAllSheets() {
 }
 
 /**
- * Add default categories
+ * إضافة التصنيفات الافتراضية
  */
 function addDefaultCategories() {
   const sheet = getOrCreateSheet(SHEETS.CATEGORIES);
@@ -123,16 +123,19 @@ function addDefaultCategories() {
   if (existingData.length <= 1) {
     const rows = [];
 
-    DEFAULT_CATEGORIES.income.forEach(cat => {
-      rows.push([cat.code, cat.nameAr, 'دخل', 'SAR', 'نعم']);
+    // تصنيفات الدخل
+    DEFAULT_CATEGORIES.دخل.forEach(cat => {
+      rows.push([cat.كود, cat.اسم, 'دخل', 'ريال', 'نعم']);
     });
 
-    DEFAULT_CATEGORIES.expense_sar.forEach(cat => {
-      rows.push([cat.code, cat.nameAr, 'مصروف', 'SAR', 'نعم']);
+    // تصنيفات المصروفات في السعودية
+    DEFAULT_CATEGORIES.مصروف_سعودي.forEach(cat => {
+      rows.push([cat.كود, cat.اسم, 'مصروف', 'ريال', 'نعم']);
     });
 
-    DEFAULT_CATEGORIES.expense_egp.forEach(cat => {
-      rows.push([cat.code, cat.nameAr, 'تحويل', 'EGP', 'نعم']);
+    // تصنيفات المصروفات في مصر
+    DEFAULT_CATEGORIES.مصروف_مصر.forEach(cat => {
+      rows.push([cat.كود, cat.اسم, 'تحويل', 'جنيه', 'نعم']);
     });
 
     if (rows.length > 0) {
@@ -142,7 +145,7 @@ function addDefaultCategories() {
 }
 
 /**
- * Add default contacts (family members)
+ * إضافة جهات الاتصال الافتراضية (العائلة)
  */
 function addDefaultContacts() {
   const sheet = getOrCreateSheet(SHEETS.CONTACTS);
@@ -150,11 +153,11 @@ function addDefaultContacts() {
 
   if (existingData.length <= 1) {
     const rows = FAMILY_CONTACTS.map(contact => [
-      contact.code,
-      contact.name,
-      contact.relation,
-      contact.aliases.join('، '),
-      contact.currency,
+      contact.كود,
+      contact.اسم,
+      contact.علاقة,
+      contact.اسماء_بديلة.join('، '),
+      contact.عملة,
       '',  // Telegram ID
       'نعم'
     ]);
