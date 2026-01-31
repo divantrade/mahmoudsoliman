@@ -337,6 +337,98 @@ function sendCustodyReport(chatId, custodian) {
 }
 
 /**
+ * ⭐⭐⭐ معالجة العهدة مباشرة - بدون Gemini ⭐⭐⭐
+ * تستخرج المبلغ والجهة من النص مباشرة
+ */
+function processCustodyDirectly(chatId, text, user) {
+  Logger.log('*** processCustodyDirectly called ***');
+  Logger.log('Text: ' + text);
+
+  try {
+    // استخراج المبلغ (أرقام عربية وإنجليزية)
+    const arabicNums = {'٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9'};
+    let normalizedText = text;
+    for (let ar in arabicNums) {
+      normalizedText = normalizedText.replace(new RegExp(ar, 'g'), arabicNums[ar]);
+    }
+
+    // البحث عن الأرقام
+    const amountMatch = normalizedText.match(/(\d+)/);
+    if (!amountMatch) {
+      sendMessage(chatId, '❌ لم أجد مبلغ في الرسالة.\n\nجرب: حولت لسارة 5000 عهدة');
+      return;
+    }
+
+    const amount = parseInt(amountMatch[1]);
+    Logger.log('Amount found: ' + amount);
+
+    // تحديد أمين العهدة (سارة أو مصطفى)
+    let custodian = 'سارة'; // افتراضي
+    if (/مصطف[يى]/i.test(text)) {
+      custodian = 'مصطفى';
+    } else if (/سار[ةه]/i.test(text)) {
+      custodian = 'سارة';
+    }
+    Logger.log('Custodian: ' + custodian);
+
+    // تحديد العملة
+    let currency = 'جنيه'; // العهدة عادة بالجنيه
+    if (/ريال/i.test(text)) {
+      currency = 'ريال';
+    }
+
+    // استخراج سعر الصرف والمبلغ المستلم إن وجد
+    let exchangeRate = null;
+    let amountReceived = null;
+
+    // البحث عن نمط "ما يعادل X" أو "يعادل X"
+    const exchangeMatch = normalizedText.match(/(?:ما\s*)?يعادل\s*(\d+)/i);
+    if (exchangeMatch) {
+      amountReceived = parseInt(exchangeMatch[1]);
+      if (amount > 0 && amountReceived > 0) {
+        exchangeRate = (amountReceived / amount).toFixed(2);
+      }
+      Logger.log('Exchange rate: ' + exchangeRate + ', Amount received: ' + amountReceived);
+    }
+
+    // إنشاء بيانات العهدة
+    const custodyData = {
+      type: 'إيداع_عهدة',
+      custodian: custodian,
+      amount: amountReceived || amount, // استخدم المبلغ المستلم إن وجد
+      currency: 'جنيه',
+      category: '',
+      beneficiary: '',
+      description: 'عهدة ' + custodian + (exchangeRate ? ' (سعر: ' + exchangeRate + ')' : ''),
+      user_name: user.name,
+      telegram_id: user.telegram_id
+    };
+    Logger.log('Custody data: ' + JSON.stringify(custodyData));
+
+    // حفظ في شيت العهد
+    const result = addCustodyTransaction(custodyData);
+    Logger.log('Result: ' + JSON.stringify(result));
+
+    if (result && result.success) {
+      let msg = '✅ تم تسجيل عهدة:\n\n';
+      msg += '• إيداع_عهدة: ' + custodyData.amount + ' جنيه لـ ' + custodian + '\n';
+      if (exchangeRate) {
+        msg += '• سعر الصرف: ' + exchangeRate + '\n';
+        msg += '• المبلغ الأصلي: ' + amount + ' ' + currency + '\n';
+      }
+      msg += '\n💼 رصيد العهدة: ' + result.balance + ' جنيه';
+      sendMessage(chatId, msg);
+    } else {
+      sendMessage(chatId, '❌ فشل تسجيل العهدة: ' + (result ? result.message : 'خطأ غير معروف'));
+    }
+
+  } catch (error) {
+    Logger.log('Error in processCustodyDirectly: ' + error.toString());
+    sendMessage(chatId, '❌ خطأ في معالجة العهدة: ' + error.message);
+  }
+}
+
+/**
  * معالجة الرسائل بالذكاء الاصطناعي
  */
 function processUserMessage(chatId, text, user) {
@@ -345,10 +437,13 @@ function processUserMessage(chatId, text, user) {
   sendChatAction(chatId, 'typing');
 
   try {
-    // ⭐ فحص أولي لكلمة العهدة
+    // ⭐⭐⭐ فحص كلمة العهدة أولاً - معالجة مباشرة بدون Gemini ⭐⭐⭐
     const hasOhdaKeyword = /عهد[ةه]|العهد[ةه]/i.test(text);
+
     if (hasOhdaKeyword) {
-      Logger.log('⭐ كلمة عهدة موجودة في الرسالة');
+      Logger.log('*** CUSTODY KEYWORD DETECTED ***');
+      processCustodyDirectly(chatId, text, user);
+      return;
     }
 
     const parsed = parseMessageWithGemini(text, user.name);
