@@ -726,6 +726,98 @@ function processAssociationDirectly(chatId, text, user) {
 }
 
 /**
+ * ⭐⭐⭐ معالجة التحويل المركب ⭐⭐⭐
+ * مثال: "حولت لمصطفي 300 ريال ما يعادل 9000 جنيه منهم 4000 لمراتي و 4000 مصطفي و 1000 تفضل مع مصطفي في العهده"
+ */
+function processCompoundTransferDirectly(chatId, text, user) {
+  Logger.log('=== processCompoundTransferDirectly START ===');
+  Logger.log('Text: ' + text);
+
+  try {
+    // استخدام دالة parseCompoundTransfer من SheetsManager
+    var parsedCompound = parseCompoundTransfer(text);
+
+    if (!parsedCompound || !parsedCompound.isCompound || !parsedCompound.transactions || parsedCompound.transactions.length === 0) {
+      sendMessage(chatId, '❌ لم أفهم التحويل المركب.\n\nجرب:\n• حولت لمصطفي 300 ريال ما يعادل 9000 جنيه منهم 4000 لمراتي و 4000 مصطفي و 1000 عهدة');
+      return;
+    }
+
+    Logger.log('Parsed compound: ' + JSON.stringify(parsedCompound));
+
+    // بناء رسالة المعاينة
+    var previewMsg = '📋 *تحويل مركب - مراجعة قبل الحفظ*\n';
+    previewMsg += '━━━━━━━━━━━━━━━━━━━━━\n\n';
+
+    // المعلومات الرئيسية
+    previewMsg += '💰 *المبلغ الإجمالي:* ' + parsedCompound.totalAmountSAR + ' ريال\n';
+    previewMsg += '📥 *ما يعادل:* ' + parsedCompound.totalAmountEGP + ' جنيه\n';
+    previewMsg += '📊 *سعر الصرف:* ' + parsedCompound.exchangeRate + '\n';
+    previewMsg += '👤 *أمين العهدة:* ' + parsedCompound.custodian + '\n\n';
+
+    previewMsg += '━━━━━━━━━━━━━━━━━━━━━\n';
+    previewMsg += '*📝 المعاملات التي سيتم إنشاؤها:*\n\n';
+
+    // عرض كل معاملة
+    for (var i = 0; i < parsedCompound.transactions.length; i++) {
+      var t = parsedCompound.transactions[i];
+      var icon = t.type === 'إيداع_عهدة' ? '📥' : '📤';
+      var typeDisplay = t.type.replace(/_/g, ' ');
+
+      previewMsg += icon + ' *' + (i + 1) + '. ' + typeDisplay + '*\n';
+      previewMsg += '   المبلغ: ' + t.amount + ' ' + t.currency + '\n';
+
+      if (t.amount_received) {
+        previewMsg += '   المستلم: ' + t.amount_received + ' ' + t.currency_received + '\n';
+      }
+      if (t.contact) {
+        previewMsg += '   الجهة: ' + escapeMarkdown(t.contact) + '\n';
+      }
+      if (t.category) {
+        previewMsg += '   التصنيف: ' + escapeMarkdown(t.category) + '\n';
+      }
+      previewMsg += '\n';
+    }
+
+    previewMsg += '━━━━━━━━━━━━━━━━━━━━━\n';
+    previewMsg += '⚠️ *هل البيانات صحيحة؟*';
+
+    // إضافة معلومات المستخدم لكل معاملة
+    for (var j = 0; j < parsedCompound.transactions.length; j++) {
+      parsedCompound.transactions[j].user_name = user.name;
+      parsedCompound.transactions[j].telegram_id = user.telegram_id;
+    }
+
+    // حفظ البيانات في Cache
+    var compoundDataStr = JSON.stringify({
+      transactions: parsedCompound.transactions,
+      totalSAR: parsedCompound.totalAmountSAR,
+      totalEGP: parsedCompound.totalAmountEGP,
+      custodian: parsedCompound.custodian
+    });
+
+    var cacheKey = 'compound_' + chatId;
+    CacheService.getScriptCache().put(cacheKey, compoundDataStr, 300); // 5 دقائق
+
+    var keyboard = {
+      inline_keyboard: [
+        [
+          { text: '✅ تأكيد الكل', callback_data: 'confirm_compound_' + cacheKey },
+          { text: '❌ إلغاء', callback_data: 'cancel_' + cacheKey }
+        ]
+      ]
+    };
+
+    sendMessageWithKeyboard(chatId, previewMsg, keyboard);
+
+  } catch (error) {
+    Logger.log('EXCEPTION in processCompoundTransferDirectly: ' + error.toString());
+    sendMessage(chatId, '❌ خطأ في معالجة التحويل المركب:\n' + error.message);
+  }
+
+  Logger.log('=== processCompoundTransferDirectly END ===');
+}
+
+/**
  * معالجة الرسائل بالذكاء الاصطناعي
  */
 function processUserMessage(chatId, text, user) {
@@ -748,6 +840,28 @@ function processUserMessage(chatId, text, user) {
 
     Logger.log('Clean text: ' + cleanText);
     Logger.log('Normalized for search: ' + normalizedForSearch);
+
+    // ⭐⭐⭐ فحص التحويل المركب أولاً (قبل العهدة العادية) ⭐⭐⭐
+    // التحويل المركب يحتوي على كلمة "منهم" أو "منها" مع توزيع
+    var hasCompoundKeyword = (
+      /منهم|منها/.test(normalizedForSearch) &&
+      /حولت|تحويل|ارسلت/.test(normalizedForSearch) &&
+      /ريال|سعودي/.test(normalizedForSearch) &&
+      /يعادل/.test(normalizedForSearch)
+    );
+
+    Logger.log('Has compound keyword: ' + hasCompoundKeyword);
+
+    if (hasCompoundKeyword) {
+      Logger.log('*** COMPOUND TRANSFER DETECTED - Processing directly ***');
+      try {
+        processCompoundTransferDirectly(chatId, cleanText, user);
+      } catch (compoundError) {
+        Logger.log('❌ Error in processCompoundTransferDirectly: ' + compoundError.toString());
+        sendMessage(chatId, '❌ خطأ في معالجة التحويل المركب: ' + compoundError.message);
+      }
+      return;
+    }
 
     // البحث عن كلمة العهدة بأشكالها المختلفة
     var hasOhdaKeyword = (
@@ -1006,6 +1120,22 @@ function handleCallbackQuery(callbackQuery) {
     return;
   }
 
+  // ⭐ معالجة أزرار التحويل المركب
+  if (data.indexOf('confirm_compound_') === 0) {
+    handleConfirmCompound(chatId, data, user);
+    answerCallbackQuery(callbackQuery.id);
+    return;
+  }
+
+  // ⭐ معالجة الإلغاء (للجمعيات والتحويلات المركبة)
+  if (data.indexOf('cancel_') === 0) {
+    var cancelKey = data.replace('cancel_', '');
+    CacheService.getScriptCache().remove(cancelKey);
+    sendMessage(chatId, '❌ تم الإلغاء.');
+    answerCallbackQuery(callbackQuery.id);
+    return;
+  }
+
   switch (data) {
     // ⭐⭐⭐ أزرار تأكيد/إلغاء المعاملة ⭐⭐⭐
     case 'confirm_save':
@@ -1117,6 +1247,84 @@ function handleConfirmAssociation(chatId, data, user) {
   } catch (error) {
     Logger.log('Error in handleConfirmAssociation: ' + error.toString());
     sendMessage(chatId, '❌ خطأ: ' + error.message);
+  }
+}
+
+/**
+ * ⭐⭐⭐ معالجة تأكيد التحويل المركب ⭐⭐⭐
+ */
+function handleConfirmCompound(chatId, data, user) {
+  Logger.log('=== handleConfirmCompound ===');
+  Logger.log('Data: ' + data);
+
+  try {
+    // استخراج مفتاح الكاش من الـ callback data
+    var cacheKey = data.replace('confirm_compound_', '');
+    var compoundDataStr = CacheService.getScriptCache().get(cacheKey);
+
+    if (!compoundDataStr) {
+      sendMessage(chatId, '⏰ انتهت صلاحية البيانات. أعد كتابة رسالة التحويل المركب.');
+      return;
+    }
+
+    var compoundData = JSON.parse(compoundDataStr);
+    Logger.log('Compound data: ' + JSON.stringify(compoundData));
+
+    var transactions = compoundData.transactions;
+    var successCount = 0;
+    var savedIds = [];
+    var failedCount = 0;
+
+    // حفظ كل معاملة
+    for (var i = 0; i < transactions.length; i++) {
+      var transData = transactions[i];
+      transData.user_name = user.name;
+      transData.telegram_id = user.telegram_id;
+
+      Logger.log('Saving transaction ' + (i + 1) + ': ' + JSON.stringify(transData));
+
+      var result = addTransaction(transData);
+      Logger.log('Save result: ' + JSON.stringify(result));
+
+      if (result && result.success) {
+        successCount++;
+        savedIds.push(result.id);
+      } else {
+        failedCount++;
+        Logger.log('Failed to save transaction: ' + JSON.stringify(transData));
+      }
+    }
+
+    // حذف الكاش
+    CacheService.getScriptCache().remove(cacheKey);
+
+    // إرسال رسالة النجاح
+    if (successCount > 0) {
+      var successMsg = '✅ *تم حفظ التحويل المركب بنجاح!*\n\n';
+      successMsg += '📊 *الملخص:*\n';
+      successMsg += '• المبلغ الإجمالي: ' + compoundData.totalSAR + ' ريال\n';
+      successMsg += '• ما يعادل: ' + compoundData.totalEGP + ' جنيه\n';
+      successMsg += '• أمين العهدة: ' + compoundData.custodian + '\n\n';
+
+      successMsg += '📝 *تم حفظ ' + successCount + ' معاملة:*\n';
+      successMsg += '🔢 أرقام الحركات: #' + savedIds.join(', #') + '\n\n';
+
+      // حساب رصيد العهدة الحالي
+      var custodyBalance = calculateCustodyBalanceFromTransactions(compoundData.custodian);
+      successMsg += '💼 *رصيد العهدة الحالي لـ ' + compoundData.custodian + ':* ' + formatNumber(custodyBalance) + ' جنيه';
+
+      if (failedCount > 0) {
+        successMsg += '\n\n⚠️ تنبيه: فشل حفظ ' + failedCount + ' معاملة';
+      }
+
+      sendMessage(chatId, successMsg);
+    } else {
+      sendMessage(chatId, '❌ فشل حفظ جميع المعاملات.');
+    }
+
+  } catch (error) {
+    Logger.log('Error in handleConfirmCompound: ' + error.toString());
+    sendMessage(chatId, '❌ خطأ في حفظ التحويل المركب: ' + error.message);
   }
 }
 
