@@ -422,6 +422,10 @@ function addTransaction(transaction) {
     const lastRow = sheet.getLastRow();
     const newId = lastRow; // Simple ID generation
 
+    // ⭐ توحيد اسم جهة الاتصال
+    var normalizedContact = normalizeContactName(transaction.contact || '');
+    Logger.log('Contact normalized: "' + (transaction.contact || '') + '" -> "' + normalizedContact + '"');
+
     const now = new Date();
     const row = [
       newId,
@@ -434,7 +438,7 @@ function addTransaction(transaction) {
       transaction.amount_received || '',
       transaction.currency_received || '',
       transaction.exchange_rate || '',
-      transaction.contact || '',
+      normalizedContact, // ⭐ استخدام الاسم الموحد
       transaction.description || '',
       transaction.user_name || '',
       transaction.telegram_id || '',
@@ -646,20 +650,35 @@ function getContactByAlias(alias) {
     const sheet = getOrCreateSheet(SHEETS.CONTACTS);
     const data = sheet.getDataRange().getValues();
 
-    const normalizedAlias = alias.toLowerCase().trim();
+    // تطبيع النص للمقارنة
+    const normalizedAlias = normalizeArabicText(alias);
 
     for (let i = 1; i < data.length; i++) {
-      const aliases = data[i][3].split('،').map(a => a.trim().toLowerCase());
-      const code = data[i][0].toLowerCase();
-      const name = data[i][1].toLowerCase();
+      if (!data[i][0] && !data[i][1]) continue; // تخطي الصفوف الفارغة
 
-      if (code === normalizedAlias ||
-        name.includes(normalizedAlias) ||
-        aliases.includes(normalizedAlias)) {
+      const code = data[i][0] || '';
+      const name = data[i][1] || '';
+      const relation = data[i][2] || '';
+      const aliasesStr = data[i][3] || '';
+      const aliases = aliasesStr.split(/[،,]/).map(a => normalizeArabicText(a.trim()));
+
+      // تطبيع الكود والاسم والعلاقة
+      const normalizedCode = normalizeArabicText(code);
+      const normalizedName = normalizeArabicText(name);
+      const normalizedRelation = normalizeArabicText(relation);
+
+      // البحث في الكود والاسم والعلاقة والأسماء البديلة
+      if (normalizedCode === normalizedAlias ||
+          normalizedName === normalizedAlias ||
+          normalizedName.indexOf(normalizedAlias) !== -1 ||
+          normalizedAlias.indexOf(normalizedName) !== -1 ||
+          normalizedRelation === normalizedAlias ||
+          aliases.indexOf(normalizedAlias) !== -1 ||
+          aliases.some(a => a.indexOf(normalizedAlias) !== -1 || normalizedAlias.indexOf(a) !== -1)) {
         return {
-          code: data[i][0],
-          name: data[i][1],
-          relation: data[i][2],
+          code: code,
+          name: name,
+          relation: relation,
           aliases: aliases,
           currency: data[i][4],
           telegram_id: data[i][5],
@@ -673,6 +692,28 @@ function getContactByAlias(alias) {
   } catch (error) {
     Logger.log('Error getting contact: ' + error.toString());
     return null;
+  }
+}
+
+/**
+ * ⭐ توحيد اسم جهة الاتصال
+ * يبحث عن الاسم في شيت جهات الاتصال ويرجع الكود الموحد
+ * @param {string} inputName - الاسم المدخل (قد يكون بأي شكل)
+ * @returns {string} الاسم الموحد (الكود) أو الاسم الأصلي إذا لم يوجد
+ */
+function normalizeContactName(inputName) {
+  if (!inputName) return '';
+
+  try {
+    var contact = getContactByAlias(inputName);
+    if (contact && contact.code) {
+      Logger.log('Normalized "' + inputName + '" to "' + contact.code + '"');
+      return contact.code;
+    }
+    return inputName; // إرجاع الاسم الأصلي إذا لم يوجد في القائمة
+  } catch (error) {
+    Logger.log('Error normalizing contact name: ' + error.toString());
+    return inputName;
   }
 }
 
