@@ -633,6 +633,99 @@ function processCustodyDirectly(chatId, text, user) {
 }
 
 /**
+ * ⭐ معالجة رسائل الجمعيات مباشرة
+ * مثال: "دخلت في جمعية من اول شهر 2 وتستمر لمدة 10 اشهر هقبض القسط الرابع بمبلغ 1000"
+ */
+function processAssociationDirectly(chatId, text, user) {
+  Logger.log('=== processAssociationDirectly START ===');
+  Logger.log('Text: ' + text);
+
+  try {
+    // استخدام دالة parseAssociationMessage من SheetsManager
+    var parsedAssoc = parseAssociationMessage(text);
+
+    if (!parsedAssoc || !parsedAssoc.isAssociation) {
+      sendMessage(chatId, '❌ لم أفهم بيانات الجمعية.\n\nجرب:\n• دخلت جمعية من شهر 2 لمدة 10 اشهر هقبض الرابع بمبلغ 1000\n• جمعية بداية شهر 3 مدة 12 شهر القسط 500 ترتيب القبض 5');
+      return;
+    }
+
+    Logger.log('Parsed association: ' + JSON.stringify(parsedAssoc));
+
+    // التحقق من البيانات المطلوبة
+    var missingFields = [];
+    if (!parsedAssoc.startMonth || parsedAssoc.startMonth <= 0) missingFields.push('شهر البداية');
+    if (!parsedAssoc.duration || parsedAssoc.duration <= 0) missingFields.push('مدة الجمعية');
+    if (!parsedAssoc.collectionOrder || parsedAssoc.collectionOrder <= 0) missingFields.push('ترتيب القبض');
+    if (!parsedAssoc.installment || parsedAssoc.installment <= 0) missingFields.push('قيمة القسط');
+
+    if (missingFields.length > 0) {
+      var helpMsg = '⚠️ بيانات ناقصة:\n';
+      helpMsg += missingFields.map(function(f) { return '• ' + f; }).join('\n');
+      helpMsg += '\n\n📝 مثال صحيح:\n';
+      helpMsg += '"دخلت جمعية من شهر 2 لمدة 10 اشهر هقبض الرابع بمبلغ 1000"';
+      sendMessage(chatId, helpMsg);
+      return;
+    }
+
+    // حساب تاريخ القبض المتوقع
+    var currentYear = new Date().getFullYear();
+    var collectionMonth = parsedAssoc.startMonth + parsedAssoc.collectionOrder - 1;
+    var collectionYear = currentYear;
+    if (collectionMonth > 12) {
+      collectionMonth -= 12;
+      collectionYear++;
+    }
+
+    // حساب المبلغ الإجمالي
+    var totalAmount = parsedAssoc.installment * parsedAssoc.duration;
+
+    // بناء رسالة المعاينة
+    var previewMsg = '🤝 *جمعية جديدة*\n';
+    previewMsg += '═══════════════════\n\n';
+    previewMsg += '💰 قيمة القسط: ' + parsedAssoc.installment.toLocaleString() + ' جنيه\n';
+    previewMsg += '📅 شهر البداية: ' + parsedAssoc.startMonth + '/' + currentYear + '\n';
+    previewMsg += '🔢 المدة: ' + parsedAssoc.duration + ' شهر\n';
+    previewMsg += '🎯 ترتيب القبض: ' + parsedAssoc.collectionOrder + '\n';
+    previewMsg += '📆 تاريخ القبض المتوقع: ' + collectionMonth + '/' + collectionYear + '\n';
+    previewMsg += '💵 المبلغ المتوقع قبضه: ' + totalAmount.toLocaleString() + ' جنيه\n\n';
+    previewMsg += '═══════════════════';
+
+    // إنشاء أزرار التأكيد والإلغاء
+    var assocDataStr = JSON.stringify({
+      type: 'association',
+      name: parsedAssoc.name,
+      installment: parsedAssoc.installment,
+      duration: parsedAssoc.duration,
+      startMonth: parsedAssoc.startMonth,
+      collectionOrder: parsedAssoc.collectionOrder,
+      user_name: user.name,
+      telegram_id: user.telegram_id
+    });
+
+    // حفظ البيانات في Cache
+    var cacheKey = 'assoc_' + chatId;
+    CacheService.getScriptCache().put(cacheKey, assocDataStr, 300); // 5 دقائق
+
+    var keyboard = {
+      inline_keyboard: [
+        [
+          { text: '✅ تأكيد', callback_data: 'confirm_assoc_' + cacheKey },
+          { text: '❌ إلغاء', callback_data: 'cancel_' + cacheKey }
+        ]
+      ]
+    };
+
+    sendMessageWithKeyboard(chatId, previewMsg, keyboard);
+
+  } catch (error) {
+    Logger.log('EXCEPTION in processAssociationDirectly: ' + error.toString());
+    sendMessage(chatId, '❌ خطأ في معالجة الجمعية:\n' + error.message);
+  }
+
+  Logger.log('=== processAssociationDirectly END ===');
+}
+
+/**
  * معالجة الرسائل بالذكاء الاصطناعي
  */
 function processUserMessage(chatId, text, user) {
@@ -674,6 +767,27 @@ function processUserMessage(chatId, text, user) {
       } catch (custodyError) {
         Logger.log('❌ Error in processCustodyDirectly: ' + custodyError.toString());
         sendMessage(chatId, '❌ خطأ في معالجة العهدة: ' + custodyError.message);
+      }
+      return;
+    }
+
+    // ⭐⭐⭐ فحص كلمة الجمعية - معالجة مباشرة ⭐⭐⭐
+    var hasAssociationKeyword = (
+      normalizedForSearch.indexOf('جمعيه') !== -1 ||
+      normalizedForSearch.indexOf('جمعية') !== -1 ||
+      /دخلت.*جمعي[ةه]/i.test(cleanText) ||
+      /جمعي[ةه].*شهر/i.test(cleanText)
+    );
+
+    Logger.log('Has association keyword: ' + hasAssociationKeyword);
+
+    if (hasAssociationKeyword) {
+      Logger.log('*** ASSOCIATION KEYWORD DETECTED - Processing directly ***');
+      try {
+        processAssociationDirectly(chatId, cleanText, user);
+      } catch (assocError) {
+        Logger.log('❌ Error in processAssociationDirectly: ' + assocError.toString());
+        sendMessage(chatId, '❌ خطأ في معالجة الجمعية: ' + assocError.message);
       }
       return;
     }
@@ -885,6 +999,13 @@ function handleCallbackQuery(callbackQuery) {
 
   var user = getUserByTelegramId(userId);
 
+  // ⭐ معالجة أزرار الجمعيات
+  if (data.indexOf('confirm_assoc_') === 0) {
+    handleConfirmAssociation(chatId, data, user);
+    answerCallbackQuery(callbackQuery.id);
+    return;
+  }
+
   switch (data) {
     // ⭐⭐⭐ أزرار تأكيد/إلغاء المعاملة ⭐⭐⭐
     case 'confirm_save':
@@ -932,6 +1053,71 @@ function handleCallbackQuery(callbackQuery) {
   }
 
   answerCallbackQuery(callbackQuery.id);
+}
+
+/**
+ * ⭐ معالجة تأكيد إضافة جمعية
+ */
+function handleConfirmAssociation(chatId, data, user) {
+  Logger.log('=== handleConfirmAssociation ===');
+  Logger.log('Data: ' + data);
+
+  try {
+    // استخراج مفتاح الكاش من الـ callback data
+    var cacheKey = data.replace('confirm_assoc_', '');
+    var assocDataStr = CacheService.getScriptCache().get(cacheKey);
+
+    if (!assocDataStr) {
+      sendMessage(chatId, '⏰ انتهت صلاحية البيانات. أعد كتابة رسالة الجمعية.');
+      return;
+    }
+
+    var assocData = JSON.parse(assocDataStr);
+    Logger.log('Association data: ' + JSON.stringify(assocData));
+
+    // إضافة الجمعية
+    var result = addNewAssociation({
+      name: assocData.name,
+      installment: assocData.installment,
+      duration: assocData.duration,
+      startMonth: assocData.startMonth,
+      collectionOrder: assocData.collectionOrder,
+      responsible: user.name
+    });
+
+    if (result.success) {
+      // حساب تاريخ القبض المتوقع
+      var currentYear = new Date().getFullYear();
+      var collectionMonth = assocData.startMonth + assocData.collectionOrder - 1;
+      var collectionYear = currentYear;
+      if (collectionMonth > 12) {
+        collectionMonth -= 12;
+        collectionYear++;
+      }
+
+      var totalAmount = assocData.installment * assocData.duration;
+
+      var successMsg = '✅ *تم تسجيل الجمعية بنجاح!*\n\n';
+      successMsg += '📋 الاسم: ' + assocData.name + '\n';
+      successMsg += '💰 القسط الشهري: ' + assocData.installment.toLocaleString() + ' جنيه\n';
+      successMsg += '🔢 المدة: ' + assocData.duration + ' شهر\n';
+      successMsg += '🎯 ترتيب القبض: ' + assocData.collectionOrder + '\n';
+      successMsg += '📅 موعد القبض: ' + collectionMonth + '/' + collectionYear + '\n';
+      successMsg += '💵 ستقبض: ' + totalAmount.toLocaleString() + ' جنيه\n\n';
+      successMsg += '📝 يمكنك تسجيل أقساط من القائمة: 🤝 الجمعيات';
+
+      sendMessage(chatId, successMsg);
+
+      // حذف الكاش
+      CacheService.getScriptCache().remove(cacheKey);
+    } else {
+      sendMessage(chatId, '❌ خطأ في حفظ الجمعية: ' + result.message);
+    }
+
+  } catch (error) {
+    Logger.log('Error in handleConfirmAssociation: ' + error.toString());
+    sendMessage(chatId, '❌ خطأ: ' + error.message);
+  }
 }
 
 /**
