@@ -11,7 +11,7 @@
 function onOpen() {
   var ui = SpreadsheetApp.getUi();
 
-  ui.createMenu('نظام محمود')
+  ui.createMenu('💼 نظام محمود')
     // قسم التقارير
     .addSubMenu(ui.createMenu('📊 التقارير')
       .addItem('تقرير اليوم', 'menuShowTodayReport')
@@ -29,6 +29,16 @@ function onOpen() {
       .addSeparator()
       .addItem('عرض رصيد سارة', 'menuShowSaraBalance')
       .addItem('عرض رصيد مصطفى', 'menuShowMostafaBalance'))
+
+    // قسم الجمعيات
+    .addSubMenu(ui.createMenu('🤝 الجمعيات')
+      .addItem('عرض جميع الجمعيات', 'menuShowAllAssociations')
+      .addItem('إضافة جمعية جديدة...', 'menuAddNewAssociation')
+      .addSeparator()
+      .addItem('تسجيل دفعة قسط...', 'menuRecordInstallmentPayment')
+      .addItem('تسجيل قبض من جمعية...', 'menuRecordAssociationCollection')
+      .addSeparator()
+      .addItem('تقرير الجمعيات', 'menuShowAssociationsReport'))
 
     // قسم الأدوات
     .addSubMenu(ui.createMenu('🔧 أدوات')
@@ -514,4 +524,263 @@ function getReportForDateRange(startDate, endDate) {
     netAmount: totalIncome - totalExpenses,
     transactionCount: transactionCount
   };
+}
+
+// =====================================================
+// دوال الجمعيات
+// =====================================================
+
+/**
+ * عرض جميع الجمعيات
+ */
+function menuShowAllAssociations() {
+  var ui = SpreadsheetApp.getUi();
+
+  try {
+    var associations = getAllAssociations();
+
+    if (!associations || associations.length === 0) {
+      ui.alert('الجمعيات', 'لا توجد جمعيات مسجلة حالياً.', ui.ButtonSet.OK);
+      return;
+    }
+
+    var message = '🤝 الجمعيات المسجلة\n';
+    message += '═══════════════════════════\n\n';
+
+    associations.forEach(function(assoc, index) {
+      message += (index + 1) + '. ' + assoc.name + '\n';
+      message += '   💰 قيمة القسط: ' + formatNumber(assoc.installment) + '\n';
+      message += '   📅 البداية: ' + assoc.startDate + '\n';
+      message += '   🔢 المدة: ' + assoc.duration + ' شهر\n';
+      message += '   🎯 ترتيب القبض: ' + assoc.collectionOrder + '\n';
+      message += '   📊 الحالة: ' + assoc.status + '\n\n';
+    });
+
+    ui.alert('الجمعيات', message, ui.ButtonSet.OK);
+  } catch (error) {
+    ui.alert('خطأ', 'حدث خطأ: ' + error.message, ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * إضافة جمعية جديدة
+ */
+function menuAddNewAssociation() {
+  var ui = SpreadsheetApp.getUi();
+
+  // اسم الجمعية
+  var response = ui.prompt('جمعية جديدة', 'أدخل اسم الجمعية:', ui.ButtonSet.OK_CANCEL);
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+  var name = response.getResponseText().trim();
+  if (!name) { ui.alert('خطأ', 'يرجى إدخال اسم الجمعية', ui.ButtonSet.OK); return; }
+
+  // قيمة القسط
+  response = ui.prompt('جمعية جديدة', 'أدخل قيمة القسط الشهري:', ui.ButtonSet.OK_CANCEL);
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+  var installment = parseFloat(response.getResponseText()) || 0;
+  if (installment <= 0) { ui.alert('خطأ', 'يرجى إدخال قيمة صحيحة للقسط', ui.ButtonSet.OK); return; }
+
+  // عدد الأشهر
+  response = ui.prompt('جمعية جديدة', 'أدخل مدة الجمعية (عدد الأشهر):', ui.ButtonSet.OK_CANCEL);
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+  var duration = parseInt(response.getResponseText()) || 0;
+  if (duration <= 0) { ui.alert('خطأ', 'يرجى إدخال عدد صحيح للأشهر', ui.ButtonSet.OK); return; }
+
+  // تاريخ البداية
+  response = ui.prompt('جمعية جديدة', 'أدخل شهر البداية (1-12):', ui.ButtonSet.OK_CANCEL);
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+  var startMonth = parseInt(response.getResponseText()) || 1;
+
+  // ترتيب القبض
+  response = ui.prompt('جمعية جديدة', 'أدخل ترتيب القبض (مثال: 4 يعني الشهر الرابع):', ui.ButtonSet.OK_CANCEL);
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+  var collectionOrder = parseInt(response.getResponseText()) || 1;
+
+  try {
+    var result = addNewAssociation({
+      name: name,
+      installment: installment,
+      duration: duration,
+      startMonth: startMonth,
+      collectionOrder: collectionOrder
+    });
+
+    if (result.success) {
+      // حساب تاريخ القبض المتوقع
+      var currentYear = new Date().getFullYear();
+      var collectionMonth = startMonth + collectionOrder - 1;
+      var collectionYear = currentYear;
+      if (collectionMonth > 12) {
+        collectionMonth -= 12;
+        collectionYear++;
+      }
+
+      var message = '✅ تم إضافة الجمعية بنجاح!\n\n';
+      message += '📋 الاسم: ' + name + '\n';
+      message += '💰 القسط: ' + formatNumber(installment) + '\n';
+      message += '🔢 المدة: ' + duration + ' شهر\n';
+      message += '🎯 ترتيب القبض: ' + collectionOrder + '\n';
+      message += '📅 تاريخ القبض المتوقع: شهر ' + collectionMonth + '/' + collectionYear + '\n';
+      message += '💵 المبلغ المتوقع: ' + formatNumber(installment * duration);
+
+      ui.alert('نجاح', message, ui.ButtonSet.OK);
+    } else {
+      ui.alert('خطأ', result.message, ui.ButtonSet.OK);
+    }
+  } catch (error) {
+    ui.alert('خطأ', 'حدث خطأ: ' + error.message, ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * تسجيل دفعة قسط
+ */
+function menuRecordInstallmentPayment() {
+  var ui = SpreadsheetApp.getUi();
+
+  try {
+    var associations = getAllAssociations();
+    if (!associations || associations.length === 0) {
+      ui.alert('تنبيه', 'لا توجد جمعيات مسجلة. قم بإضافة جمعية أولاً.', ui.ButtonSet.OK);
+      return;
+    }
+
+    // عرض قائمة الجمعيات
+    var assocList = associations.map(function(a, i) { return (i + 1) + '. ' + a.name; }).join('\n');
+    var response = ui.prompt(
+      'تسجيل دفعة قسط',
+      'اختر رقم الجمعية:\n' + assocList,
+      ui.ButtonSet.OK_CANCEL
+    );
+
+    if (response.getSelectedButton() !== ui.Button.OK) return;
+    var assocIndex = parseInt(response.getResponseText()) - 1;
+    if (assocIndex < 0 || assocIndex >= associations.length) {
+      ui.alert('خطأ', 'رقم غير صحيح', ui.ButtonSet.OK);
+      return;
+    }
+
+    var selectedAssoc = associations[assocIndex];
+
+    // تأكيد الدفعة
+    var confirm = ui.alert(
+      'تأكيد',
+      'هل تريد تسجيل دفعة قسط بقيمة ' + formatNumber(selectedAssoc.installment) + ' لجمعية "' + selectedAssoc.name + '"؟',
+      ui.ButtonSet.YES_NO
+    );
+
+    if (confirm !== ui.Button.YES) return;
+
+    var result = recordAssociationInstallment(selectedAssoc.id, selectedAssoc.installment);
+
+    if (result.success) {
+      var message = '✅ تم تسجيل الدفعة بنجاح!\n\n';
+      message += '📋 الجمعية: ' + selectedAssoc.name + '\n';
+      message += '💰 المبلغ: ' + formatNumber(selectedAssoc.installment) + '\n';
+      message += '📊 الأقساط المدفوعة: ' + result.paidCount + ' من ' + selectedAssoc.duration;
+
+      ui.alert('نجاح', message, ui.ButtonSet.OK);
+    } else {
+      ui.alert('خطأ', result.message, ui.ButtonSet.OK);
+    }
+  } catch (error) {
+    ui.alert('خطأ', 'حدث خطأ: ' + error.message, ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * تسجيل قبض من جمعية
+ */
+function menuRecordAssociationCollection() {
+  var ui = SpreadsheetApp.getUi();
+
+  try {
+    var associations = getAllAssociations();
+    if (!associations || associations.length === 0) {
+      ui.alert('تنبيه', 'لا توجد جمعيات مسجلة.', ui.ButtonSet.OK);
+      return;
+    }
+
+    // عرض قائمة الجمعيات
+    var assocList = associations.map(function(a, i) {
+      return (i + 1) + '. ' + a.name + ' (المبلغ: ' + formatNumber(a.installment * a.duration) + ')';
+    }).join('\n');
+
+    var response = ui.prompt(
+      'تسجيل قبض من جمعية',
+      'اختر رقم الجمعية:\n' + assocList,
+      ui.ButtonSet.OK_CANCEL
+    );
+
+    if (response.getSelectedButton() !== ui.Button.OK) return;
+    var assocIndex = parseInt(response.getResponseText()) - 1;
+    if (assocIndex < 0 || assocIndex >= associations.length) {
+      ui.alert('خطأ', 'رقم غير صحيح', ui.ButtonSet.OK);
+      return;
+    }
+
+    var selectedAssoc = associations[assocIndex];
+    var totalAmount = selectedAssoc.installment * selectedAssoc.duration;
+
+    var confirm = ui.alert(
+      'تأكيد',
+      'هل تريد تسجيل قبض مبلغ ' + formatNumber(totalAmount) + ' من جمعية "' + selectedAssoc.name + '"؟',
+      ui.ButtonSet.YES_NO
+    );
+
+    if (confirm !== ui.Button.YES) return;
+
+    var result = recordAssociationCollection(selectedAssoc.id, totalAmount);
+
+    if (result.success) {
+      var message = '✅ تم تسجيل القبض بنجاح!\n\n';
+      message += '📋 الجمعية: ' + selectedAssoc.name + '\n';
+      message += '💰 المبلغ المقبوض: ' + formatNumber(totalAmount);
+
+      ui.alert('نجاح', message, ui.ButtonSet.OK);
+    } else {
+      ui.alert('خطأ', result.message, ui.ButtonSet.OK);
+    }
+  } catch (error) {
+    ui.alert('خطأ', 'حدث خطأ: ' + error.message, ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * تقرير الجمعيات
+ */
+function menuShowAssociationsReport() {
+  var ui = SpreadsheetApp.getUi();
+
+  try {
+    var report = getAssociationsReport();
+
+    if (!report || report.associations.length === 0) {
+      ui.alert('تقرير الجمعيات', 'لا توجد جمعيات مسجلة حالياً.', ui.ButtonSet.OK);
+      return;
+    }
+
+    var message = '📊 تقرير الجمعيات\n';
+    message += '═══════════════════════════\n\n';
+
+    report.associations.forEach(function(assoc) {
+      var progress = Math.round((assoc.paidInstallments / assoc.duration) * 100);
+      var progressBar = '[' + '▓'.repeat(Math.floor(progress / 10)) + '░'.repeat(10 - Math.floor(progress / 10)) + ']';
+
+      message += '📋 ' + assoc.name + '\n';
+      message += '   ' + progressBar + ' ' + progress + '%\n';
+      message += '   💰 المدفوع: ' + formatNumber(assoc.totalPaid) + ' / ' + formatNumber(assoc.totalAmount) + '\n';
+      message += '   📅 الأقساط: ' + assoc.paidInstallments + ' / ' + assoc.duration + '\n';
+      message += '   🎯 موعد القبض: ' + assoc.collectionDate + '\n';
+      message += '   📊 الحالة: ' + (assoc.collected ? '✅ تم القبض' : '⏳ لم يتم القبض بعد') + '\n\n';
+    });
+
+    message += '═══════════════════════════\n';
+    message += '💵 إجمالي المدفوع: ' + formatNumber(report.totalPaid) + '\n';
+    message += '💰 إجمالي المتوقع قبضه: ' + formatNumber(report.totalExpected);
+
+    ui.alert('تقرير الجمعيات', message, ui.ButtonSet.OK);
+  } catch (error) {
+    ui.alert('خطأ', 'حدث خطأ: ' + error.message, ui.ButtonSet.OK);
+  }
 }
