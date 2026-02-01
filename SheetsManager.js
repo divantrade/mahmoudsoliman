@@ -1607,3 +1607,182 @@ function parseAssociationMessage(text) {
     return null;
   }
 }
+
+/**
+ * ⭐⭐⭐ تحليل التحويل المركب ⭐⭐⭐
+ * يحلل رسائل مثل: "حولت لمصطفي 300 ريال ما يعادل 9000 جنيه منهم 4000 لمراتي و 4000 مصطفي و 1000 تفضل مع مصطفي في العهده"
+ * ويرجع مصفوفة من المعاملات
+ */
+function parseCompoundTransfer(text) {
+  try {
+    Logger.log('=== parseCompoundTransfer START ===');
+    Logger.log('Input: ' + text);
+
+    // تحويل الأرقام العربية والهندية إلى إنجليزية
+    var arabicNums = {
+      '٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9',
+      '۰':'0','۱':'1','۲':'2','۳':'3','۴':'4','۵':'5','۶':'6','۷':'7','۸':'8','۹':'9'
+    };
+    var normalizedText = text;
+    for (var ar in arabicNums) {
+      normalizedText = normalizedText.replace(new RegExp(ar, 'g'), arabicNums[ar]);
+    }
+
+    // تنظيف النص
+    var cleanText = normalizedText.replace(/[\u200B-\u200D\u200E\u200F\uFEFF\u00A0]/g, '');
+    cleanText = cleanText.replace(/[ةه]/g, 'ه').replace(/[يى]/g, 'ي').replace(/[أإآا]/g, 'ا');
+
+    Logger.log('Normalized: ' + cleanText);
+
+    // التحقق من أن الرسالة تحتوي على كلمة "منهم" أو توزيع
+    var hasDistribution = /منهم|منها|منه/.test(cleanText);
+    if (!hasDistribution) {
+      Logger.log('No distribution keyword found');
+      return null;
+    }
+
+    var result = {
+      isCompound: true,
+      totalAmountSAR: 0,
+      totalAmountEGP: 0,
+      exchangeRate: 0,
+      custodian: 'مصطفى', // الافتراضي
+      distributions: [],
+      transactions: []
+    };
+
+    // استخراج أمين العهدة من بداية الرسالة
+    if (/حولت\s*ل?سار[هة]/i.test(cleanText)) {
+      result.custodian = 'سارة';
+    } else if (/حولت\s*ل?مصطف[يى]/i.test(cleanText)) {
+      result.custodian = 'مصطفى';
+    }
+    Logger.log('Custodian: ' + result.custodian);
+
+    // استخراج المبلغ الإجمالي وسعر الصرف
+    // نمط: "300 ريال ما يعادل 9000 جنيه" أو "300 ريال يعادل 9000"
+    var totalMatch = cleanText.match(/(\d+)\s*(?:ريال|سعودي).*?(?:ما\s*)?يعادل\s*(\d+)/i);
+    if (totalMatch) {
+      result.totalAmountSAR = parseInt(totalMatch[1]);
+      result.totalAmountEGP = parseInt(totalMatch[2]);
+      if (result.totalAmountSAR > 0) {
+        result.exchangeRate = (result.totalAmountEGP / result.totalAmountSAR).toFixed(2);
+      }
+      Logger.log('Total: ' + result.totalAmountSAR + ' SAR = ' + result.totalAmountEGP + ' EGP, Rate: ' + result.exchangeRate);
+    } else {
+      Logger.log('Could not extract total amount');
+      return null;
+    }
+
+    // استخراج التوزيع بعد "منهم"
+    var distributionPart = cleanText.split(/منهم|منها|منه/)[1];
+    if (!distributionPart) {
+      Logger.log('No distribution part found');
+      return null;
+    }
+    Logger.log('Distribution part: ' + distributionPart);
+
+    // قائمة الكلمات المفتاحية للعهدة
+    var custodyKeywords = ['عهده', 'العهده', 'تفضل', 'يفضل', 'يتبقي', 'الباقي', 'المتبقي'];
+
+    // تقسيم التوزيع - نمط: "4000 لمراتي و 4000 مصطفي و 1000 تفضل مع مصطفي في العهده"
+    // أو "4000 لزوجتي و 4000 لمصطفى و 1000 عهدة"
+    var distributionRegex = /(\d+)\s*(?:جنيه)?\s*(?:ل)?([^\d٠-٩۰-۹و،,]+)/gi;
+    var match;
+    var totalDistributed = 0;
+
+    while ((match = distributionRegex.exec(distributionPart)) !== null) {
+      var amount = parseInt(match[1]);
+      var recipientRaw = match[2].trim();
+
+      // تنظيف اسم المستلم
+      var recipient = recipientRaw
+        .replace(/^ل|^الى|^إلى/g, '')
+        .replace(/في$/g, '')
+        .replace(/مع$/g, '')
+        .trim();
+
+      if (amount > 0 && recipient.length > 0) {
+        // تحديد إذا كان هذا للعهدة
+        var isCustody = false;
+        for (var k = 0; k < custodyKeywords.length; k++) {
+          if (recipientRaw.indexOf(custodyKeywords[k]) !== -1 || recipient.indexOf(custodyKeywords[k]) !== -1) {
+            isCustody = true;
+            break;
+          }
+        }
+
+        result.distributions.push({
+          amount: amount,
+          recipient: recipient,
+          isCustody: isCustody
+        });
+        totalDistributed += amount;
+        Logger.log('Distribution: ' + amount + ' -> ' + recipient + (isCustody ? ' (عهدة)' : ''));
+      }
+    }
+
+    Logger.log('Total distributed: ' + totalDistributed + ' / Total EGP: ' + result.totalAmountEGP);
+
+    // إنشاء المعاملات
+    // 1. معاملة إيداع العهدة الرئيسية
+    result.transactions.push({
+      type: 'إيداع_عهدة',
+      amount: result.totalAmountSAR,
+      currency: 'ريال',
+      amount_received: result.totalAmountEGP,
+      currency_received: 'جنيه',
+      exchange_rate: result.exchangeRate,
+      category: 'عهدة ' + result.custodian,
+      contact: result.custodian,
+      description: 'تحويل مركب - إيداع عهدة'
+    });
+
+    // 2. معاملات الصرف لكل توزيع (ما عدا العهدة)
+    for (var i = 0; i < result.distributions.length; i++) {
+      var dist = result.distributions[i];
+
+      if (!dist.isCustody) {
+        // تحديد الجهة من اسم المستلم
+        var contactName = dist.recipient;
+        var category = 'مساعدة';
+
+        // محاولة تطبيع اسم الجهة
+        if (/مرات[يه]|زوجت[يه]|الزوج[هة]/i.test(dist.recipient)) {
+          contactName = normalizeContactName('الزوجة') || 'Om Celia';
+          category = 'مصروفات عائلية';
+        } else if (/مصطف[يى]/i.test(dist.recipient)) {
+          contactName = normalizeContactName('مصطفى') || 'مصطفى';
+          category = 'مساعدة';
+        } else if (/سار[هة]/i.test(dist.recipient)) {
+          contactName = normalizeContactName('سارة') || 'سارة';
+          category = 'مساعدة';
+        } else {
+          // محاولة البحث عن الجهة
+          var normalizedContact = normalizeContactName(dist.recipient);
+          if (normalizedContact) {
+            contactName = normalizedContact;
+          }
+        }
+
+        result.transactions.push({
+          type: 'صرف_من_عهدة',
+          amount: dist.amount,
+          currency: 'جنيه',
+          category: category,
+          contact: contactName,
+          description: 'صرف من عهدة ' + result.custodian + ' - ' + dist.recipient
+        });
+      }
+    }
+
+    Logger.log('Generated ' + result.transactions.length + ' transactions');
+    Logger.log('=== parseCompoundTransfer END ===');
+
+    return result;
+
+  } catch (error) {
+    Logger.log('Error in parseCompoundTransfer: ' + error.toString());
+    return null;
+  }
+}
