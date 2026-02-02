@@ -2269,11 +2269,12 @@ function parseCompoundTransfer(text) {
           recipientDisplay = 'قسط جمعية';
           Logger.log('Association payment detected: ' + dist.amount);
         }
-        // ===== التحقق من الزوجة =====
-        else if (/مرات[يه]|زوجت[يه]|الزوج[هة]/i.test(dist.recipient)) {
-          contactName = normalizeContactName('الزوجة') || 'Om Celia';
-          category = findMatchingCategory('زوجة', 'تحويل');
-          recipientDisplay = 'زوجتي';
+        // ===== التحقق من الزوجة (ام سيليا) - تحويل لعهدة =====
+        else if (/مرات[يه]|زوجت[يه]|الزوج[هة]|ام\s*سيليا|أم\s*سيليا/i.test(dist.recipient)) {
+          contactName = normalizeContactName('ام سيليا') || 'Om Celia';
+          // ⭐ التحويل للزوجة = إيداع عهدة (سيتم معالجته بشكل خاص)
+          dist.isWifeCustody = true;
+          recipientDisplay = 'ام سيليا';
         }
         // ===== التحقق من مصطفى =====
         else if (/مصطف[يى]/i.test(dist.recipient)) {
@@ -2307,14 +2308,27 @@ function parseCompoundTransfer(text) {
           Logger.log('No category found for ' + dist.recipient + ', using default: ' + category);
         }
 
-        result.transactions.push({
-          type: 'صرف_من_عهدة',
-          amount: dist.amount,
-          currency: 'جنيه',
-          category: category,
-          contact: contactName,
-          description: 'صرف من عهدة ' + result.custodian + ' - ' + recipientDisplay
-        });
+        // ⭐ التحويل للزوجة (ام سيليا) = إيداع عهدة لها وليس صرف من عهدة الأمين
+        if (dist.isWifeCustody) {
+          result.transactions.push({
+            type: 'إيداع_عهدة',
+            amount: dist.amount,
+            currency: 'جنيه',
+            category: 'عهدة ام سيليا',
+            contact: contactName,
+            description: 'عهدة ام سيليا من تحويل ' + result.custodian
+          });
+          Logger.log('Wife custody deposit: ' + dist.amount + ' -> ام سيليا');
+        } else {
+          result.transactions.push({
+            type: 'صرف_من_عهدة',
+            amount: dist.amount,
+            currency: 'جنيه',
+            category: category,
+            contact: contactName,
+            description: 'صرف من عهدة ' + result.custodian + ' - ' + recipientDisplay
+          });
+        }
       }
     }
 
