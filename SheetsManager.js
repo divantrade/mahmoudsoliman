@@ -2080,6 +2080,8 @@ function parseCompoundTransfer(text) {
       // تنظيف
       parentRecipient = parentRecipient.replace(/^(?:ل|لل|ال|يدفع|تدفع|يعطي|تعطي|اعطي)\s*/i, '').trim();
       nestedRecipient = nestedRecipient.replace(/\s*(?:جنيه|ريال|دولار)$/i, '').trim();
+      // إزالة "جنيه" من بداية المستلم الفرعي أيضاً
+      nestedRecipient = nestedRecipient.replace(/^(?:جنيه|ريال|دولار)\s*/i, '').trim();
 
       // التحقق من صحة البيانات
       if (parentAmount > 0 && nestedAmount > 0 && nestedAmount < parentAmount && nestedRecipient.length > 1) {
@@ -2099,6 +2101,19 @@ function parseCompoundTransfer(text) {
             Logger.log('Updated parent distribution: ' + distributions[nd].amount);
             break;
           }
+        }
+
+        // ⭐ إذا لم نجد التوزيع الأصلي، نُنشئه بالمبلغ المتبقي
+        if (!foundParent && parentRecipient.length > 1) {
+          Logger.log('Parent distribution not found, creating new one for: ' + parentRecipient);
+          distributions.push({
+            amount: parentAmount - nestedAmount,
+            recipient: parentRecipient,
+            isCustody: false,
+            hasNested: true,
+            createdFromNested: true
+          });
+          Logger.log('Created parent distribution: ' + (parentAmount - nestedAmount) + ' -> ' + parentRecipient);
         }
 
         // إضافة التوزيع الفرعي
