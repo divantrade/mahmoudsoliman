@@ -393,6 +393,89 @@ function getCategoryCodesForAI(type) {
 }
 
 /**
+ * ⭐ البحث عن التصنيف المطابق من شيت التصنيفات
+ * @param {string} keyword - الكلمة المفتاحية للبحث (مثل: زوجة، أهل، مصطفى)
+ * @param {string} type - نوع المعاملة (تحويل، عهدة، مصروف)
+ * @returns {string} كود التصنيف المطابق أو التصنيف الافتراضي
+ */
+function findMatchingCategory(keyword, type) {
+  try {
+    // قراءة جميع التصنيفات من الشيت
+    var allCategories = [];
+    var types = type ? [type] : ['تحويل', 'عهدة', 'مصروف'];
+
+    for (var t = 0; t < types.length; t++) {
+      var cats = getCategoriesFromSheet(types[t]);
+      for (var c = 0; c < cats.length; c++) {
+        allCategories.push(cats[c]);
+      }
+    }
+
+    if (allCategories.length === 0) {
+      Logger.log('No categories found in sheet');
+      return 'متنوع';
+    }
+
+    // تطبيع الكلمة المفتاحية للمقارنة
+    var normalizedKeyword = keyword.replace(/[ةه]/g, 'ه')
+                                   .replace(/[يى]/g, 'ي')
+                                   .replace(/[أإآا]/g, 'ا')
+                                   .toLowerCase();
+
+    Logger.log('Finding category for keyword: ' + keyword + ' (normalized: ' + normalizedKeyword + ')');
+
+    // البحث عن تطابق
+    for (var i = 0; i < allCategories.length; i++) {
+      var cat = allCategories[i];
+      var normalizedCode = cat.كود.replace(/[ةه]/g, 'ه')
+                                  .replace(/[يى]/g, 'ي')
+                                  .replace(/[أإآا]/g, 'ا')
+                                  .toLowerCase();
+      var normalizedName = (cat.اسم || '').replace(/[ةه]/g, 'ه')
+                                          .replace(/[يى]/g, 'ي')
+                                          .replace(/[أإآا]/g, 'ا')
+                                          .toLowerCase();
+
+      // البحث عن الكلمة المفتاحية في الكود أو الاسم
+      if (normalizedCode.indexOf(normalizedKeyword) !== -1 ||
+          normalizedKeyword.indexOf(normalizedCode) !== -1 ||
+          normalizedName.indexOf(normalizedKeyword) !== -1) {
+        Logger.log('Found matching category: ' + cat.كود);
+        return cat.كود; // إرجاع الكود الأصلي من الشيت
+      }
+    }
+
+    // البحث بالكلمات المفتاحية الشائعة
+    if (/زوج|مرات/i.test(normalizedKeyword)) {
+      // البحث عن تصنيف الزوجة
+      for (var j = 0; j < allCategories.length; j++) {
+        if (/زوج/i.test(allCategories[j].كود)) {
+          Logger.log('Found wife category: ' + allCategories[j].كود);
+          return allCategories[j].كود;
+        }
+      }
+    }
+
+    if (/اهل|عائل/i.test(normalizedKeyword)) {
+      // البحث عن تصنيف الأهل
+      for (var k = 0; k < allCategories.length; k++) {
+        if (/اهل|أهل/i.test(allCategories[k].كود)) {
+          Logger.log('Found family category: ' + allCategories[k].كود);
+          return allCategories[k].كود;
+        }
+      }
+    }
+
+    Logger.log('No matching category found, returning default');
+    return 'متنوع';
+
+  } catch (error) {
+    Logger.log('Error finding category: ' + error.toString());
+    return 'متنوع';
+  }
+}
+
+/**
  * Add default settings
  */
 function addDefaultSettings() {
@@ -1863,6 +1946,17 @@ function parseCompoundTransfer(text) {
 
     // إنشاء المعاملات
     // 1. معاملة إيداع العهدة الرئيسية
+    // البحث عن تصنيف العهدة من الشيت (مثل: عهدة مصطفى)
+    var custodyCategory = findMatchingCategory('عهدة ' + result.custodian, 'عهدة');
+    if (custodyCategory === 'متنوع') {
+      // إذا لم يجد، جرب البحث باسم الأمين فقط
+      custodyCategory = findMatchingCategory(result.custodian, 'عهدة');
+    }
+    if (custodyCategory === 'متنوع') {
+      // الافتراضي
+      custodyCategory = 'عهدة ' + result.custodian;
+    }
+
     result.transactions.push({
       type: 'إيداع_عهدة',
       amount: result.totalAmountSAR,
@@ -1870,7 +1964,7 @@ function parseCompoundTransfer(text) {
       amount_received: result.totalAmountEGP,
       currency_received: 'جنيه',
       exchange_rate: result.exchangeRate,
-      category: 'عهدة ' + result.custodian,
+      category: custodyCategory,
       contact: result.custodian,
       description: 'تحويل مركب - إيداع عهدة'
     });
@@ -1882,33 +1976,35 @@ function parseCompoundTransfer(text) {
       if (!dist.isCustody) {
         // تحديد الجهة من اسم المستلم
         var contactName = dist.recipient;
-        var category = 'مساعدة أهل';
+        var category = '';
         var recipientDisplay = dist.recipient;
 
         // محاولة تطبيع اسم الجهة
-        // نستخدم أسماء وتصنيفات موحدة
+        // نستخدم التصنيفات من شيت التصنيفات
         if (/مرات[يه]|زوجت[يه]|الزوج[هة]/i.test(dist.recipient)) {
           contactName = normalizeContactName('الزوجة') || 'Om Celia';
-          category = 'مصروفات عائلية';
+          category = findMatchingCategory('زوجة', 'تحويل');
           recipientDisplay = 'زوجتي';
         } else if (/مصطف[يى]/i.test(dist.recipient)) {
           // مصطفى هو أمين العهدة - يأخذ لنفسه
           contactName = normalizeContactName('مصطفى') || 'مصطفى';
-          category = 'مساعدة أهل';
+          category = findMatchingCategory('الأهل', 'تحويل');
           recipientDisplay = 'مصطفى';
         } else if (/سار[هة]/i.test(dist.recipient)) {
           contactName = normalizeContactName('سارة') || 'سارة';
-          category = 'مساعدة أهل';
+          category = findMatchingCategory('الأهل', 'تحويل');
           recipientDisplay = 'سارة';
         } else if (/اهل|أهل|عائل[هة]/i.test(dist.recipient)) {
           contactName = normalizeContactName(dist.recipient) || dist.recipient;
-          category = 'مساعدة أهل';
+          category = findMatchingCategory('الأهل', 'تحويل');
         } else {
-          // محاولة البحث عن الجهة
+          // محاولة البحث عن الجهة والتصنيف
           var normalizedContact = normalizeContactName(dist.recipient);
           if (normalizedContact) {
             contactName = normalizedContact;
           }
+          // البحث عن تصنيف مطابق للمستلم
+          category = findMatchingCategory(dist.recipient, 'تحويل');
         }
 
         result.transactions.push({
