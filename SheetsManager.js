@@ -1738,7 +1738,9 @@ function parseCompoundTransfer(text) {
     Logger.log('Normalized: ' + cleanText);
 
     // التحقق من أن الرسالة تحتوي على توزيع
-    var hasDistribution = /منهم|منها|يعطي|تعطي|وياخد|ياخد|ويخلي|يخلي|الباقي/.test(cleanText);
+    // قائمة موسعة من الأفعال: يعطي/تعطي/اعطي/هيدي/ادي/دفع/يدفع/تدفع/حول/سلم/وصل/بعت...
+    var distributionVerbs = /منهم|منها|يعطي|تعطي|اعطي|هيدي|يدي|ادي|تدي|هتدي|دفع|يدفع|تدفع|هيدفع|هتدفع|ادفع|حول|يحول|تحول|هيحول|هتحول|سلم|يسلم|تسلم|هيسلم|هتسلم|وصل|يوصل|توصل|هيوصل|هتوصل|بعت|يبعت|تبعت|هيبعت|هتبعت|وياخد|ياخد|تاخد|هياخد|هتاخد|ويخلي|يخلي|تخلي|هيخلي|هتخلي|الباقي|جمعيه|قسط/;
+    var hasDistribution = distributionVerbs.test(cleanText);
     if (!hasDistribution) {
       Logger.log('No distribution keyword found');
       return null;
@@ -1833,12 +1835,17 @@ function parseCompoundTransfer(text) {
     // نبحث عن كل الأنماط
     var distributions = [];
 
-    // ===== نمط 1: "يعطي [شخص] [مبلغ]" =====
-    var givePattern = /(?:يعطي|تعطي|اعطي|هيدي|يدي)\s+([^\d٠-٩]+?)\s*(\d+)/gi;
+    // ===== نمط 1: "[فعل] [شخص/جهة] [مبلغ]" =====
+    // أفعال موسعة: يعطي/تعطي/اعطي/هيدي/ادي/دفع/يدفع/تدفع/حول/سلم/وصل/بعت...
+    var actionVerbs = '(?:يعطي|تعطي|اعطي|هيدي|يدي|ادي|تدي|هتدي|دفع|يدفع|تدفع|هيدفع|هتدفع|ادفع|حول|يحول|تحول|هيحول|هتحول|سلم|يسلم|تسلم|هيسلم|هتسلم|وصل|يوصل|توصل|هيوصل|هتوصل|بعت|يبعت|تبعت|هيبعت|هتبعت)';
+    var givePattern = new RegExp(actionVerbs + '\\s+(?:ل)?([^\\d٠-٩]+?)\\s*(\\d+)', 'gi');
     var giveMatch;
     while ((giveMatch = givePattern.exec(distributionPart)) !== null) {
-      var giveRecipient = giveMatch[1].trim().replace(/^ل/, '');
+      var giveRecipient = giveMatch[1].trim().replace(/^ل/, '').replace(/\s+$/, '');
       var giveAmount = parseInt(giveMatch[2]);
+
+      // تنظيف اسم المستلم
+      giveRecipient = giveRecipient.replace(/^(?:ال|لل|ل)/, '').trim();
 
       // التحقق من عدم التكرار: نفس المبلغ + نفس المستلم
       var giveExists = false;
@@ -1850,12 +1857,16 @@ function parseCompoundTransfer(text) {
       }
 
       if (giveAmount > 0 && giveRecipient.length > 0 && !giveExists) {
+        // التحقق إذا كان المستلم هو "جمعية" أو "قسط جمعية"
+        var isAssociation = /جمعي|قسط/i.test(giveRecipient);
+
         distributions.push({
           amount: giveAmount,
           recipient: giveRecipient,
-          isCustody: false
+          isCustody: false,
+          isAssociation: isAssociation
         });
-        Logger.log('Give pattern: ' + giveAmount + ' -> ' + giveRecipient);
+        Logger.log('Give pattern: ' + giveAmount + ' -> ' + giveRecipient + (isAssociation ? ' (جمعية)' : ''));
       }
     }
 
@@ -2017,29 +2028,56 @@ function parseCompoundTransfer(text) {
 
         // محاولة تطبيع اسم الجهة
         // نستخدم التصنيفات من شيت التصنيفات فقط
-        if (/مرات[يه]|زوجت[يه]|الزوج[هة]/i.test(dist.recipient)) {
+
+        // ===== التحقق من الجمعية أولاً =====
+        if (dist.isAssociation || /جمعي|قسط\s*جمعي/i.test(dist.recipient)) {
+          contactName = 'جمعية';
+          // البحث عن تصنيف "قسط جمعية" في الشيت
+          category = findMatchingCategory('قسط جمعية', 'تحويل');
+          if (!category) {
+            category = findMatchingCategory('جمعية', 'تحويل');
+          }
+          if (!category) {
+            // البحث في كل التصنيفات عن أي شيء يحتوي على "جمعية"
+            for (var jc = 0; jc < transferCategories.length; jc++) {
+              if (/جمعي/i.test(transferCategories[jc].كود)) {
+                category = transferCategories[jc].كود;
+                break;
+              }
+            }
+          }
+          recipientDisplay = 'قسط جمعية';
+          Logger.log('Association payment detected: ' + dist.amount);
+        }
+        // ===== التحقق من الزوجة =====
+        else if (/مرات[يه]|زوجت[يه]|الزوج[هة]/i.test(dist.recipient)) {
           contactName = normalizeContactName('الزوجة') || 'Om Celia';
           category = findMatchingCategory('زوجة', 'تحويل');
           recipientDisplay = 'زوجتي';
-        } else if (/مصطف[يى]/i.test(dist.recipient)) {
-          // مصطفى هو أمين العهدة - يأخذ لنفسه
+        }
+        // ===== التحقق من مصطفى =====
+        else if (/مصطف[يى]/i.test(dist.recipient)) {
           contactName = normalizeContactName('مصطفى') || 'مصطفى';
           category = findMatchingCategory('الأهل', 'تحويل');
           recipientDisplay = 'مصطفى';
-        } else if (/سار[هة]/i.test(dist.recipient)) {
+        }
+        // ===== التحقق من سارة =====
+        else if (/سار[هة]/i.test(dist.recipient)) {
           contactName = normalizeContactName('سارة') || 'سارة';
           category = findMatchingCategory('الأهل', 'تحويل');
           recipientDisplay = 'سارة';
-        } else if (/اهل|أهل|عائل[هة]/i.test(dist.recipient)) {
+        }
+        // ===== التحقق من الأهل =====
+        else if (/اهل|أهل|عائل[هة]/i.test(dist.recipient)) {
           contactName = normalizeContactName(dist.recipient) || dist.recipient;
           category = findMatchingCategory('الأهل', 'تحويل');
-        } else {
-          // محاولة البحث عن الجهة والتصنيف
+        }
+        // ===== محاولة البحث عن الجهة والتصنيف =====
+        else {
           var normalizedContact = normalizeContactName(dist.recipient);
           if (normalizedContact) {
             contactName = normalizedContact;
           }
-          // البحث عن تصنيف مطابق للمستلم
           category = findMatchingCategory(dist.recipient, 'تحويل');
         }
 
