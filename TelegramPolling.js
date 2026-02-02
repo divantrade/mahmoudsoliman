@@ -715,7 +715,7 @@ function processAssociationDirectly(chatId, text, user) {
       ]
     };
 
-    sendMessageWithKeyboard(chatId, previewMsg, keyboard);
+    sendMessage(chatId, previewMsg, keyboard);
 
   } catch (error) {
     Logger.log('EXCEPTION in processAssociationDirectly: ' + error.toString());
@@ -807,7 +807,7 @@ function processCompoundTransferDirectly(chatId, text, user) {
       ]
     };
 
-    sendMessageWithKeyboard(chatId, previewMsg, keyboard);
+    sendMessage(chatId, previewMsg, keyboard);
 
   } catch (error) {
     Logger.log('EXCEPTION in processCompoundTransferDirectly: ' + error.toString());
@@ -842,19 +842,28 @@ function processUserMessage(chatId, text, user) {
     Logger.log('Normalized for search: ' + normalizedForSearch);
 
     // ⭐⭐⭐ فحص التحويل المركب أولاً (قبل العهدة العادية) ⭐⭐⭐
-    // التحويل المركب يحتوي على توزيع المبلغ على أكثر من جهة
-    var hasCompoundKeyword = (
-      /حولت|تحويل|ارسلت/.test(normalizedForSearch) &&
-      /ريال|سعودي/.test(normalizedForSearch) &&
-      /يعادل/.test(normalizedForSearch) &&
-      (
-        /منهم|منها/.test(normalizedForSearch) ||
-        /يعطي|تعطي|اعطي/.test(normalizedForSearch) ||
-        /ياخد|ياخذ|وياخد|وياخذ/.test(normalizedForSearch) ||
-        /يخلي|ويخلي|الباقي|المتبقي/.test(normalizedForSearch)
-      )
+    // التحويل المركب: تحويل + عملة + يعادل + توزيع
+    // يشمل أنماط: "منهم", "يعطي", "وياخد", "الباقي عهده"
+    var hasCompoundKeyword = false;
+
+    // شرط 1: يوجد تحويل وعملة وسعر صرف
+    var hasTransfer = /حولت|تحويل|ارسلت|بعثت/.test(normalizedForSearch);
+    var hasCurrency = /ريال|سعودي/.test(normalizedForSearch);
+    var hasExchange = /يعادل|معادل/.test(normalizedForSearch);
+
+    // شرط 2: يوجد توزيع (أي من هذه الكلمات)
+    var hasDistribution = (
+      /منهم|منها/.test(normalizedForSearch) ||
+      /يعطي|تعطي|اعطي|هيدي|يدي/.test(normalizedForSearch) ||
+      /ياخد|ياخذ|وياخد|وياخذ|ياخده|لنفسه/.test(normalizedForSearch) ||
+      /يحول|يوصل|يبعت/.test(normalizedForSearch) ||
+      /الباقي|المتبقي|يتبقي|يفضل|تفضل/.test(normalizedForSearch)
     );
 
+    hasCompoundKeyword = hasTransfer && hasCurrency && hasExchange && hasDistribution;
+
+    Logger.log('Detection: hasTransfer=' + hasTransfer + ', hasCurrency=' + hasCurrency +
+               ', hasExchange=' + hasExchange + ', hasDistribution=' + hasDistribution);
     Logger.log('Has compound keyword: ' + hasCompoundKeyword);
 
     if (hasCompoundKeyword) {
