@@ -842,12 +842,17 @@ function processUserMessage(chatId, text, user) {
     Logger.log('Normalized for search: ' + normalizedForSearch);
 
     // ⭐⭐⭐ فحص التحويل المركب أولاً (قبل العهدة العادية) ⭐⭐⭐
-    // التحويل المركب يحتوي على كلمة "منهم" أو "منها" مع توزيع
+    // التحويل المركب يحتوي على توزيع المبلغ على أكثر من جهة
     var hasCompoundKeyword = (
-      /منهم|منها/.test(normalizedForSearch) &&
       /حولت|تحويل|ارسلت/.test(normalizedForSearch) &&
       /ريال|سعودي/.test(normalizedForSearch) &&
-      /يعادل/.test(normalizedForSearch)
+      /يعادل/.test(normalizedForSearch) &&
+      (
+        /منهم|منها/.test(normalizedForSearch) ||
+        /يعطي|تعطي|اعطي/.test(normalizedForSearch) ||
+        /ياخد|ياخذ|وياخد|وياخذ/.test(normalizedForSearch) ||
+        /يخلي|ويخلي|الباقي|المتبقي/.test(normalizedForSearch)
+      )
     );
 
     Logger.log('Has compound keyword: ' + hasCompoundKeyword);

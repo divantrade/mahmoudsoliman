@@ -1610,7 +1610,9 @@ function parseAssociationMessage(text) {
 
 /**
  * ⭐⭐⭐ تحليل التحويل المركب ⭐⭐⭐
- * يحلل رسائل مثل: "حولت لمصطفي 300 ريال ما يعادل 9000 جنيه منهم 4000 لمراتي و 4000 مصطفي و 1000 تفضل مع مصطفي في العهده"
+ * يحلل رسائل مثل:
+ * - "حولت لمصطفي 300 ريال ما يعادل 9000 جنيه منهم 4000 لمراتي و 4000 مصطفي و 1000 تفضل مع مصطفي في العهده"
+ * - "حولت لمصطفي 3000 ريال ما يعادل 10000 مصري يعطي لزوجتي 400 وياخد لنفسه 4000 ويخلي الباقي عهده"
  * ويرجع مصفوفة من المعاملات
  */
 function parseCompoundTransfer(text) {
@@ -1634,8 +1636,8 @@ function parseCompoundTransfer(text) {
 
     Logger.log('Normalized: ' + cleanText);
 
-    // التحقق من أن الرسالة تحتوي على كلمة "منهم" أو توزيع
-    var hasDistribution = /منهم|منها|منه/.test(cleanText);
+    // التحقق من أن الرسالة تحتوي على توزيع
+    var hasDistribution = /منهم|منها|يعطي|تعطي|وياخد|ياخد|ويخلي|يخلي|الباقي/.test(cleanText);
     if (!hasDistribution) {
       Logger.log('No distribution keyword found');
       return null;
@@ -1660,7 +1662,7 @@ function parseCompoundTransfer(text) {
     Logger.log('Custodian: ' + result.custodian);
 
     // استخراج المبلغ الإجمالي وسعر الصرف
-    // نمط: "300 ريال ما يعادل 9000 جنيه" أو "300 ريال يعادل 9000"
+    // نمط: "300 ريال ما يعادل 9000 جنيه" أو "300 ريال يعادل 9000 مصري"
     var totalMatch = cleanText.match(/(\d+)\s*(?:ريال|سعودي).*?(?:ما\s*)?يعادل\s*(\d+)/i);
     if (totalMatch) {
       result.totalAmountSAR = parseInt(totalMatch[1]);
@@ -1674,54 +1676,113 @@ function parseCompoundTransfer(text) {
       return null;
     }
 
-    // استخراج التوزيع بعد "منهم"
-    var distributionPart = cleanText.split(/منهم|منها|منه/)[1];
-    if (!distributionPart) {
+    // تحديد نوع الرسالة وطريقة استخراج التوزيع
+    var distributionPart = '';
+
+    // نمط 1: "منهم 4000 لمراتي و 4000 مصطفي"
+    if (/منهم|منها|منه/.test(cleanText)) {
+      distributionPart = cleanText.split(/منهم|منها|منه/)[1] || '';
+    }
+    // نمط 2: "يعطي لزوجتي 400 وياخد لنفسه 4000 ويخلي الباقي عهده"
+    else {
+      // استخراج الجزء بعد "مصري" أو "جنيه" بعد يعادل
+      var afterCurrency = cleanText.split(/يعادل\s*\d+\s*(?:مصري|جنيه)?/)[1] || '';
+      distributionPart = afterCurrency;
+    }
+
+    if (!distributionPart || distributionPart.trim().length < 3) {
       Logger.log('No distribution part found');
       return null;
     }
     Logger.log('Distribution part: ' + distributionPart);
 
     // قائمة الكلمات المفتاحية للعهدة
-    var custodyKeywords = ['عهده', 'العهده', 'تفضل', 'يفضل', 'يتبقي', 'الباقي', 'المتبقي'];
+    var custodyKeywords = ['عهده', 'العهده', 'تفضل', 'يفضل', 'يتبقي', 'الباقي', 'المتبقي', 'يخلي', 'ويخلي'];
 
-    // تقسيم التوزيع - نمط: "4000 لمراتي و 4000 مصطفي و 1000 تفضل مع مصطفي في العهده"
-    // أو "4000 لزوجتي و 4000 لمصطفى و 1000 عهدة"
-    var distributionRegex = /(\d+)\s*(?:جنيه)?\s*(?:ل)?([^\d٠-٩۰-۹و،,]+)/gi;
-    var match;
-    var totalDistributed = 0;
+    // أنماط متعددة لاستخراج التوزيع
+    // نمط 1: "4000 لمراتي" أو "4000 مصطفي"
+    // نمط 2: "يعطي لزوجتي 400" أو "وياخد لنفسه 4000"
+    // نمط 3: "ويخلي الباقي عهده"
 
-    while ((match = distributionRegex.exec(distributionPart)) !== null) {
-      var amount = parseInt(match[1]);
-      var recipientRaw = match[2].trim();
+    // نبحث عن كل الأنماط
+    var distributions = [];
 
-      // تنظيف اسم المستلم
-      var recipient = recipientRaw
-        .replace(/^ل|^الى|^إلى/g, '')
-        .replace(/في$/g, '')
-        .replace(/مع$/g, '')
-        .trim();
-
-      if (amount > 0 && recipient.length > 0) {
-        // تحديد إذا كان هذا للعهدة
-        var isCustody = false;
-        for (var k = 0; k < custodyKeywords.length; k++) {
-          if (recipientRaw.indexOf(custodyKeywords[k]) !== -1 || recipient.indexOf(custodyKeywords[k]) !== -1) {
-            isCustody = true;
-            break;
-          }
-        }
-
-        result.distributions.push({
-          amount: amount,
-          recipient: recipient,
-          isCustody: isCustody
-        });
-        totalDistributed += amount;
-        Logger.log('Distribution: ' + amount + ' -> ' + recipient + (isCustody ? ' (عهدة)' : ''));
+    // نمط: "يعطي/تعطي لـ[شخص] [مبلغ]"
+    var givePattern = /(?:يعطي|تعطي|اعطي)\s*(?:ل)?([^\d٠-٩۰-۹]+?)\s*(\d+)/gi;
+    var giveMatch;
+    while ((giveMatch = givePattern.exec(distributionPart)) !== null) {
+      var recipient = giveMatch[1].trim().replace(/^ل/, '');
+      var amount = parseInt(giveMatch[2]);
+      if (amount > 0) {
+        distributions.push({ amount: amount, recipient: recipient, isCustody: false });
+        Logger.log('Give pattern: ' + amount + ' -> ' + recipient);
       }
     }
 
+    // نمط: "وياخد/ياخد لنفسه/له [مبلغ]"
+    var takePattern = /(?:وياخد|ياخد|وياخذ|ياخذ)\s*(?:ل)?(?:نفسه|نفسها|ه|ها)?\s*(\d+)/gi;
+    var takeMatch;
+    while ((takeMatch = takePattern.exec(distributionPart)) !== null) {
+      var takeAmount = parseInt(takeMatch[1]);
+      if (takeAmount > 0) {
+        distributions.push({ amount: takeAmount, recipient: result.custodian, isCustody: false, forSelf: true });
+        Logger.log('Take pattern: ' + takeAmount + ' -> ' + result.custodian + ' (for self)');
+      }
+    }
+
+    // نمط: "ويخلي/يخلي الباقي عهده" أو "[مبلغ] عهده"
+    var custodyPattern = /(?:ويخلي|يخلي)\s*(?:ال)?باقي\s*(?:ال)?عهد/gi;
+    if (custodyPattern.test(distributionPart)) {
+      // حساب الباقي
+      var totalDistributed = 0;
+      for (var d = 0; d < distributions.length; d++) {
+        totalDistributed += distributions[d].amount;
+      }
+      var remaining = result.totalAmountEGP - totalDistributed;
+      if (remaining > 0) {
+        distributions.push({ amount: remaining, recipient: 'عهده', isCustody: true });
+        Logger.log('Custody (remaining): ' + remaining);
+      }
+    }
+
+    // نمط قديم: "[مبلغ] ل[شخص]"
+    var oldPattern = /(\d+)\s*(?:جنيه)?\s*(?:ل)?([^\d٠-٩۰-۹و،,]+)/gi;
+    var oldMatch;
+    while ((oldMatch = oldPattern.exec(distributionPart)) !== null) {
+      var oldAmount = parseInt(oldMatch[1]);
+      var oldRecipient = oldMatch[2].trim().replace(/^ل|^الي|^إلي/g, '').replace(/في$/g, '').replace(/مع$/g, '').trim();
+
+      // تجنب التكرار
+      var alreadyAdded = false;
+      for (var e = 0; e < distributions.length; e++) {
+        if (distributions[e].amount === oldAmount) {
+          alreadyAdded = true;
+          break;
+        }
+      }
+
+      if (oldAmount > 0 && oldRecipient.length > 0 && !alreadyAdded) {
+        var oldIsCustody = false;
+        for (var k = 0; k < custodyKeywords.length; k++) {
+          if (oldRecipient.indexOf(custodyKeywords[k]) !== -1) {
+            oldIsCustody = true;
+            break;
+          }
+        }
+        distributions.push({ amount: oldAmount, recipient: oldRecipient, isCustody: oldIsCustody });
+        Logger.log('Old pattern: ' + oldAmount + ' -> ' + oldRecipient + (oldIsCustody ? ' (custody)' : ''));
+      }
+    }
+
+    result.distributions = distributions;
+
+    // حساب إجمالي التوزيع
+    var totalDistributed = 0;
+    for (var f = 0; f < distributions.length; f++) {
+      if (!distributions[f].isCustody) {
+        totalDistributed += distributions[f].amount;
+      }
+    }
     Logger.log('Total distributed: ' + totalDistributed + ' / Total EGP: ' + result.totalAmountEGP);
 
     // إنشاء المعاملات
