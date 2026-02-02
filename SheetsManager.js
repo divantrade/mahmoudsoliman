@@ -1639,6 +1639,8 @@ function parseCompoundTransfer(text) {
 
     // تنظيف النص
     var cleanText = normalizedText.replace(/[\u200B-\u200D\u200E\u200F\uFEFF\u00A0]/g, '');
+    // استبدال الأسطر الجديدة بمسافات لتسهيل التحليل
+    cleanText = cleanText.replace(/[\r\n]+/g, ' ');
     cleanText = cleanText.replace(/[ةه]/g, 'ه').replace(/[يى]/g, 'ي').replace(/[أإآا]/g, 'ا');
 
     Logger.log('Normalized: ' + cleanText);
@@ -1708,17 +1710,25 @@ function parseCompoundTransfer(text) {
       }
     }
 
-    // إذا كان جزء التوزيع يبدأ بـ "عهده" نأخذ ما بعدها
-    if (distributionPart && /^عهده?\s+/i.test(distributionPart)) {
-      distributionPart = distributionPart.replace(/^عهده?\s+/i, '');
-      Logger.log('Removed leading عهده: ' + distributionPart);
+    // إذا كان جزء التوزيع يبدأ بـ "عهده" أو "عهد" نأخذ ما بعدها
+    // نجعل المسافة اختيارية لمرونة أكبر
+    if (distributionPart && /^عهده?\s*/i.test(distributionPart)) {
+      var beforeRemove = distributionPart;
+      distributionPart = distributionPart.replace(/^عهده?\s*/i, '');
+      if (distributionPart.length > 2) {
+        Logger.log('Removed leading عهده: "' + beforeRemove + '" -> "' + distributionPart + '"');
+      } else {
+        // إذا أصبح النص قصيراً جداً بعد الإزالة، نبحث في النص الكامل
+        distributionPart = beforeRemove;
+      }
     }
 
-    // إذا لم نجد جزء التوزيع، نبحث عن "عهده" ونأخذ ما بعدها
+    // إذا لم نجد جزء التوزيع أو كان قصيراً، نبحث عن "عهده" ونأخذ ما بعدها
     if (!distributionPart || distributionPart.trim().length < 3) {
-      var afterOhda = cleanText.match(/عهده\s+(.+)/i);
+      var afterOhda = cleanText.match(/عهده?\s+(.+)/i);
       if (afterOhda && afterOhda[1]) {
         distributionPart = afterOhda[1];
+        Logger.log('Found distribution after عهده: ' + distributionPart);
       }
     }
 
@@ -1872,18 +1882,27 @@ function parseCompoundTransfer(text) {
       if (!dist.isCustody) {
         // تحديد الجهة من اسم المستلم
         var contactName = dist.recipient;
-        var category = 'مساعدة';
+        var category = 'مساعدة أهل';
+        var recipientDisplay = dist.recipient;
 
         // محاولة تطبيع اسم الجهة
+        // نستخدم أسماء وتصنيفات موحدة
         if (/مرات[يه]|زوجت[يه]|الزوج[هة]/i.test(dist.recipient)) {
           contactName = normalizeContactName('الزوجة') || 'Om Celia';
           category = 'مصروفات عائلية';
+          recipientDisplay = 'زوجتي';
         } else if (/مصطف[يى]/i.test(dist.recipient)) {
+          // مصطفى هو أمين العهدة - يأخذ لنفسه
           contactName = normalizeContactName('مصطفى') || 'مصطفى';
-          category = 'مساعدة';
+          category = 'مساعدة أهل';
+          recipientDisplay = 'مصطفى';
         } else if (/سار[هة]/i.test(dist.recipient)) {
           contactName = normalizeContactName('سارة') || 'سارة';
-          category = 'مساعدة';
+          category = 'مساعدة أهل';
+          recipientDisplay = 'سارة';
+        } else if (/اهل|أهل|عائل[هة]/i.test(dist.recipient)) {
+          contactName = normalizeContactName(dist.recipient) || dist.recipient;
+          category = 'مساعدة أهل';
         } else {
           // محاولة البحث عن الجهة
           var normalizedContact = normalizeContactName(dist.recipient);
@@ -1898,7 +1917,7 @@ function parseCompoundTransfer(text) {
           currency: 'جنيه',
           category: category,
           contact: contactName,
-          description: 'صرف من عهدة ' + result.custodian + ' - ' + dist.recipient
+          description: 'صرف من عهدة ' + result.custodian + ' - ' + recipientDisplay
         });
       }
     }
