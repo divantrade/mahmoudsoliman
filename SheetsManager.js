@@ -1724,71 +1724,83 @@ function parseCompoundTransfer(text) {
     // نبحث عن كل الأنماط
     var distributions = [];
 
-    // ===== استخراج كل الأرقام مع السياق =====
-    // نبحث عن أنماط مثل: "يعطي زوجتي 4000" أو "4000 لمراتي"
+    // ===== نمط 1: "يعطي [شخص] [مبلغ]" =====
+    var givePattern = /(?:يعطي|تعطي|اعطي|هيدي|يدي)\s+([^\d٠-٩]+?)\s*(\d+)/gi;
+    var giveMatch;
+    while ((giveMatch = givePattern.exec(distributionPart)) !== null) {
+      var giveRecipient = giveMatch[1].trim().replace(/^ل/, '');
+      var giveAmount = parseInt(giveMatch[2]);
 
-    // نمط 1: "يعطي/وياخذ [شخص] [مبلغ]"
-    var verbAmountPattern = /(?:يعطي|تعطي|اعطي|هيدي|يدي|وياخد|ياخد|وياخذ|ياخذ)\s+([^\d]+?)\s*(\d+)/gi;
-    var verbMatch;
-    while ((verbMatch = verbAmountPattern.exec(distributionPart)) !== null) {
-      var recipient = verbMatch[1].trim().replace(/^ل/, '').replace(/\s+$/, '');
-      var amount = parseInt(verbMatch[2]);
-
-      // تحديد إذا كان "لنفسه" أو للأمين
-      var isForSelf = /نفسه|نفسها|^ه$|لنفسه/.test(recipient);
-      if (isForSelf) {
-        recipient = result.custodian;
+      var giveExists = false;
+      for (var gi = 0; gi < distributions.length; gi++) {
+        if (distributions[gi].amount === giveAmount) { giveExists = true; break; }
       }
 
-      var exists = false;
-      for (var i = 0; i < distributions.length; i++) {
-        if (distributions[i].amount === amount) { exists = true; break; }
-      }
-
-      if (amount > 0 && !exists) {
+      if (giveAmount > 0 && giveRecipient.length > 0 && !giveExists) {
         distributions.push({
-          amount: amount,
-          recipient: recipient,
+          amount: giveAmount,
+          recipient: giveRecipient,
+          isCustody: false
+        });
+        Logger.log('Give pattern: ' + giveAmount + ' -> ' + giveRecipient);
+      }
+    }
+
+    // ===== نمط 2: "وياخذ/ياخذ [مبلغ]" (لنفسه - بدون اسم) =====
+    var takePattern = /(?:وياخد|ياخد|وياخذ|ياخذ)\s*(?:لنفسه|نفسه|له|ه)?\s*(\d+)/gi;
+    var takeMatch;
+    while ((takeMatch = takePattern.exec(distributionPart)) !== null) {
+      var takeAmount = parseInt(takeMatch[1]);
+
+      var takeExists = false;
+      for (var ti = 0; ti < distributions.length; ti++) {
+        if (distributions[ti].amount === takeAmount) { takeExists = true; break; }
+      }
+
+      if (takeAmount > 0 && !takeExists) {
+        distributions.push({
+          amount: takeAmount,
+          recipient: result.custodian,
           isCustody: false,
-          forSelf: isForSelf
+          forSelf: true
         });
-        Logger.log('Verb pattern: ' + amount + ' -> ' + recipient + (isForSelf ? ' (self)' : ''));
+        Logger.log('Take pattern (self): ' + takeAmount + ' -> ' + result.custodian);
       }
     }
 
-    // نمط 2: "[مبلغ] ل[شخص]" أو "[مبلغ] [شخص]"
-    var amountRecipientPattern = /(\d+)\s*(?:ل)?([^\d\s][^\d]*?)(?=\s*(?:و|$|\d))/gi;
+    // ===== نمط 3: "[مبلغ] ل[شخص]" =====
+    var amountFirstPattern = /(\d+)\s*(?:ل|الى|إلى)?\s*([^\d٠-٩\s][^\d٠-٩و]*?)(?=\s*(?:و|$))/gi;
     var amountMatch;
-    while ((amountMatch = amountRecipientPattern.exec(distributionPart)) !== null) {
-      var amountVal = parseInt(amountMatch[1]);
-      var recipientVal = amountMatch[2].trim().replace(/^ل/, '');
+    while ((amountMatch = amountFirstPattern.exec(distributionPart)) !== null) {
+      var amtVal = parseInt(amountMatch[1]);
+      var recVal = amountMatch[2].trim().replace(/^ل/, '');
 
-      // تجاهل إذا كان المستلم فارغ أو كلمة عهده فقط
-      if (!recipientVal || recipientVal.length < 2) continue;
+      // تجاهل الكلمات المفتاحية والقصيرة
+      if (!recVal || recVal.length < 2) continue;
+      if (/^(?:و|ال|في|من)$/.test(recVal)) continue;
 
-      var existsVal = false;
-      for (var j = 0; j < distributions.length; j++) {
-        if (distributions[j].amount === amountVal) { existsVal = true; break; }
+      var amtExists = false;
+      for (var ai = 0; ai < distributions.length; ai++) {
+        if (distributions[ai].amount === amtVal) { amtExists = true; break; }
       }
 
-      if (amountVal > 0 && !existsVal) {
-        // تحديد إذا كان للعهدة
-        var isCustodyVal = /عهده|الباقي|المتبقي/.test(recipientVal);
+      if (amtVal > 0 && !amtExists) {
+        var isCustodyAmt = /عهده?|باقي|متبقي/.test(recVal);
 
         distributions.push({
-          amount: amountVal,
-          recipient: recipientVal,
-          isCustody: isCustodyVal
+          amount: amtVal,
+          recipient: recVal,
+          isCustody: isCustodyAmt
         });
-        Logger.log('Amount pattern: ' + amountVal + ' -> ' + recipientVal + (isCustodyVal ? ' (custody)' : ''));
+        Logger.log('Amount-first pattern: ' + amtVal + ' -> ' + recVal);
       }
     }
 
-    // ===== نمط 3: "الباقي عهده" أو "وعهده الباقي" =====
-    var hasCustodyRemainder = /(?:الباقي|المتبقي)\s*عهد|عهده?\s*(?:ال)?باقي|(?:ويخلي|يخلي|يفضل|تفضل)\s*(?:ال)?باقي/i.test(distributionPart);
+    // ===== نمط 4: "الباقي عهده" أو "والباقي عهده" أو "وعهده الباقي" =====
+    var hasCustodyRemainder = /(?:و)?(?:ال)?باقي\s*عهد|عهده?\s*(?:ال)?باقي/i.test(distributionPart);
 
-    Logger.log('Has custody remainder keyword: ' + hasCustodyRemainder);
-    Logger.log('Distributions found so far: ' + distributions.length);
+    Logger.log('Has custody remainder: ' + hasCustodyRemainder);
+    Logger.log('Distributions so far: ' + distributions.length);
 
     // إذا كان "الباقي عهده" بدون مبلغ محدد، نحسب الباقي
     if (hasCustodyRemainder) {
