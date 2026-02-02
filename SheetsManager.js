@@ -73,8 +73,8 @@ function getSheetHeaders(sheetName) {
       'الكود', 'الاسم', 'العلاقة', 'الأسماء_البديلة', 'العملة', 'Telegram_ID', 'نشط'
     ],
     'الجمعيات': [
-      'ID', 'الاسم', 'قيمة_القسط', 'عدد_الأشهر', 'تاريخ_البدء', 'ترتيب_القبض',
-      'تاريخ_القبض_المتوقع', 'المسؤول', 'الحالة', 'ملاحظات'
+      'ID', 'الاسم', 'المسؤول', 'قيمة_القسط', 'عدد_الأشهر', 'إجمالي_القبض',
+      'تاريخ_البدء', 'ترتيب_القبض', 'تاريخ_القبض_المتوقع', 'الحالة', 'ملاحظات'
     ],
     'الذهب': [
       'ID', 'التاريخ', 'الوزن_جرام', 'العيار', 'السعر', 'العملة',
@@ -1385,21 +1385,22 @@ function getAllAssociations() {
 
     var associations = [];
 
-    // Headers: ID, الاسم, قيمة_القسط, عدد_الأشهر, تاريخ_البدء, ترتيب_القبض, تاريخ_القبض_المتوقع, المسؤول, الحالة, ملاحظات
+    // Headers: ID, الاسم, المسؤول, قيمة_القسط, عدد_الأشهر, إجمالي_القبض, تاريخ_البدء, ترتيب_القبض, تاريخ_القبض_المتوقع, الحالة, ملاحظات
     for (var i = 1; i < data.length; i++) {
       if (!data[i][0] && !data[i][1]) continue; // تخطي الصفوف الفارغة
 
       associations.push({
         id: data[i][0],
         name: data[i][1] || '',
-        installment: parseFloat(data[i][2]) || 0,
-        duration: parseInt(data[i][3]) || 0,
-        startDate: data[i][4] || '',
-        collectionOrder: parseInt(data[i][5]) || 0,
-        expectedCollectionDate: data[i][6] || '',
-        responsible: data[i][7] || '',
-        status: data[i][8] || 'نشط',
-        notes: data[i][9] || ''
+        responsible: data[i][2] || '',
+        installment: parseFloat(data[i][3]) || 0,
+        duration: parseInt(data[i][4]) || 0,
+        totalCollection: parseFloat(data[i][5]) || 0,
+        startDate: data[i][6] || '',
+        collectionOrder: parseInt(data[i][7]) || 0,
+        expectedCollectionDate: data[i][8] || '',
+        status: data[i][9] || 'نشط',
+        notes: data[i][10] || ''
       });
     }
 
@@ -1434,15 +1435,21 @@ function addNewAssociation(assocData) {
     }
     var expectedCollectionDate = collectionYear + '-' + String(collectionMonth).padStart(2, '0') + '-01';
 
+    // حساب إجمالي القبض
+    var totalCollection = (assocData.installment || 0) * (assocData.duration || 0);
+
+    // الأعمدة: ID, الاسم, المسؤول, قيمة_القسط, عدد_الأشهر, إجمالي_القبض,
+    //          تاريخ_البدء, ترتيب_القبض, تاريخ_القبض_المتوقع, الحالة, ملاحظات
     var row = [
       newId,
       assocData.name || '',
+      assocData.responsible || '',
       assocData.installment || 0,
       assocData.duration || 0,
+      totalCollection,
       startDate,
       assocData.collectionOrder || 1,
       expectedCollectionDate,
-      assocData.responsible || '',
       'نشط',
       assocData.notes || ''
     ];
@@ -1645,10 +1652,12 @@ function parseAssociationMessage(text) {
     var result = {
       isAssociation: false,
       name: '',
+      responsiblePerson: '',  // الشخص المسؤول عن الجمعية
       startMonth: 0,
       duration: 0,
       collectionOrder: 0,
-      installment: 0
+      installment: 0,
+      totalCollection: 0      // إجمالي القبض = المدة × القسط
     };
 
     // التحقق من أن الرسالة تتعلق بجمعية
@@ -1658,33 +1667,90 @@ function parseAssociationMessage(text) {
 
     result.isAssociation = true;
 
-    // استخراج شهر البداية
+    // ===== استخراج الشخص المسؤول =====
+    // أنماط مثل: "سارة مراتي دخلت جمعية" أو "جمعية مع سارة" أو "جمعية ام محمد مع سارة"
+    var responsiblePatterns = [
+      /^([^\d]+?)\s+دخل[ت]?\s+جمعي/i,           // سارة مراتي دخلت جمعية
+      /جمعي[هة]?\s+(?:[^\s]+\s+)?مع\s+([^\d]+?)(?:\s+من|\s+لمدة|$)/i,  // جمعية مع سارة / جمعية ام محمد مع سارة
+      /مع\s+([^\d]+?)\s+(?:من|لمدة|بقيمة)/i     // مع سارة من شهر
+    ];
+
+    for (var rp = 0; rp < responsiblePatterns.length; rp++) {
+      var respMatch = cleanText.match(responsiblePatterns[rp]);
+      if (respMatch && respMatch[1]) {
+        result.responsiblePerson = respMatch[1].trim();
+        Logger.log('Found responsible person: ' + result.responsiblePerson);
+        break;
+      }
+    }
+
+    // ===== استخراج اسم الجمعية =====
+    // أنماط مثل: "جمعية ام احمد" أو "جمعية سارة"
+    var namePatterns = [
+      /جمعي[هة]?\s+([^\d\s][^\d]*?)(?:\s+مع|\s+من|\s+لمدة|\s+بقيمة|$)/i,  // جمعية ام احمد مع...
+      /جمعي[هة]?\s+([أ-ي\s]+?)(?:\s+من|\s+لمدة)/i   // جمعية سارة من شهر
+    ];
+
+    var associationName = '';
+    for (var np = 0; np < namePatterns.length; np++) {
+      var nameMatch = cleanText.match(namePatterns[np]);
+      if (nameMatch && nameMatch[1]) {
+        var potentialName = nameMatch[1].trim();
+        // تجاهل الكلمات المفتاحية
+        if (!/^(?:من|لمدة|مع|بقيمة|شهر)$/i.test(potentialName) && potentialName.length > 1) {
+          associationName = potentialName;
+          Logger.log('Found association name: ' + associationName);
+          break;
+        }
+      }
+    }
+
+    // ===== استخراج شهر البداية =====
     var startMonthMatch = cleanText.match(/(?:من|بداية|اول|أول)\s*(?:شهر)?\s*(\d{1,2})/i);
     if (startMonthMatch) {
       result.startMonth = parseInt(startMonthMatch[1]);
     }
 
-    // استخراج المدة
+    // ===== استخراج المدة =====
     var durationMatch = cleanText.match(/(?:لمدة|مدة|تستمر)\s*(\d{1,2})\s*(?:شهر|اشهر|أشهر)/i);
     if (durationMatch) {
       result.duration = parseInt(durationMatch[1]);
     }
 
-    // استخراج ترتيب القبض
-    var collectionMatch = cleanText.match(/(?:القسط|الدور|ترتيب|هقبض|اقبض|أقبض)\s*(?:ال)?(\d{1,2}|الاول|الأول|الثاني|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر)/i);
-    if (collectionMatch) {
-      var orderText = collectionMatch[1];
-      var orderMap = {
-        'الاول': 1, 'الأول': 1, 'الثاني': 2, 'الثالث': 3, 'الرابع': 4,
-        'الخامس': 5, 'السادس': 6, 'السابع': 7, 'الثامن': 8, 'التاسع': 9, 'العاشر': 10
-      };
-      result.collectionOrder = orderMap[orderText] || parseInt(orderText) || 0;
+    // ===== استخراج ترتيب القبض =====
+    // أنماط موسعة: هنقبض/هقبض/اقبض/نقبض ال/الـ 10 أو الرابع/الخامس...
+    var collectionPatterns = [
+      /(?:هنقبض|هقبض|هاقبض|اقبض|أقبض|نقبض|القسط|الدور|ترتيب)\s*(?:ال|الـ)?\s*(\d{1,2})/i,
+      /(?:هنقبض|هقبض|هاقبض|اقبض|أقبض|نقبض|القسط|الدور|ترتيب)\s*(?:ال|الـ)?\s*(الاول|الأول|الثاني|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر)/i
+    ];
+
+    var orderMap = {
+      'الاول': 1, 'الأول': 1, 'الثاني': 2, 'الثالث': 3, 'الرابع': 4,
+      'الخامس': 5, 'السادس': 6, 'السابع': 7, 'الثامن': 8, 'التاسع': 9, 'العاشر': 10
+    };
+
+    for (var cp = 0; cp < collectionPatterns.length; cp++) {
+      var collectionMatch = cleanText.match(collectionPatterns[cp]);
+      if (collectionMatch && collectionMatch[1]) {
+        var orderText = collectionMatch[1];
+        result.collectionOrder = orderMap[orderText] || parseInt(orderText) || 0;
+        Logger.log('Found collection order: ' + result.collectionOrder);
+        break;
+      }
     }
 
-    // استخراج قيمة القسط
-    var amountMatch = cleanText.match(/(?:بمبلغ|قسط|القسط)\s*(\d+(?:,\d+)?(?:\.\d+)?)/i);
-    if (amountMatch) {
-      result.installment = parseFloat(amountMatch[1].replace(/,/g, ''));
+    // ===== استخراج قيمة القسط =====
+    var amountPatterns = [
+      /(?:بمبلغ|بقيمة|قسط|القسط)\s*(\d+(?:,\d+)?(?:\.\d+)?)/i,
+      /(\d{3,})\s*(?:جنيه|ريال)/i
+    ];
+
+    for (var ap = 0; ap < amountPatterns.length; ap++) {
+      var amountMatch = cleanText.match(amountPatterns[ap]);
+      if (amountMatch && amountMatch[1]) {
+        result.installment = parseFloat(amountMatch[1].replace(/,/g, ''));
+        break;
+      }
     }
 
     // إذا لم يتم العثور على المبلغ، ابحث عن أي رقم كبير
@@ -1695,8 +1761,17 @@ function parseAssociationMessage(text) {
       }
     }
 
-    // اسم الجمعية الافتراضي
-    result.name = 'جمعية شهر ' + result.startMonth + '/' + new Date().getFullYear();
+    // ===== حساب إجمالي القبض =====
+    if (result.duration > 0 && result.installment > 0) {
+      result.totalCollection = result.duration * result.installment;
+    }
+
+    // ===== اسم الجمعية =====
+    if (associationName) {
+      result.name = 'جمعية ' + associationName;
+    } else {
+      result.name = 'جمعية شهر ' + result.startMonth + '/' + new Date().getFullYear();
+    }
 
     Logger.log('Parsed association: ' + JSON.stringify(result));
     return result;
@@ -1738,7 +1813,9 @@ function parseCompoundTransfer(text) {
     Logger.log('Normalized: ' + cleanText);
 
     // التحقق من أن الرسالة تحتوي على توزيع
-    var hasDistribution = /منهم|منها|يعطي|تعطي|وياخد|ياخد|ويخلي|يخلي|الباقي/.test(cleanText);
+    // قائمة موسعة من الأفعال: يعطي/تعطي/اعطي/هيدي/ادي/دفع/يدفع/تدفع/حول/سلم/وصل/بعت...
+    var distributionVerbs = /منهم|منها|يعطي|تعطي|اعطي|هيدي|يدي|ادي|تدي|هتدي|دفع|يدفع|تدفع|هيدفع|هتدفع|ادفع|حول|يحول|تحول|هيحول|هتحول|سلم|يسلم|تسلم|هيسلم|هتسلم|وصل|يوصل|توصل|هيوصل|هتوصل|بعت|يبعت|تبعت|هيبعت|هتبعت|وياخد|ياخد|تاخد|هياخد|هتاخد|ويخلي|يخلي|تخلي|هيخلي|هتخلي|الباقي|جمعيه|قسط/;
+    var hasDistribution = distributionVerbs.test(cleanText);
     if (!hasDistribution) {
       Logger.log('No distribution keyword found');
       return null;
@@ -1833,12 +1910,17 @@ function parseCompoundTransfer(text) {
     // نبحث عن كل الأنماط
     var distributions = [];
 
-    // ===== نمط 1: "يعطي [شخص] [مبلغ]" =====
-    var givePattern = /(?:يعطي|تعطي|اعطي|هيدي|يدي)\s+([^\d٠-٩]+?)\s*(\d+)/gi;
+    // ===== نمط 1: "[فعل] [شخص/جهة] [مبلغ]" =====
+    // أفعال موسعة: يعطي/تعطي/اعطي/هيدي/ادي/دفع/يدفع/تدفع/حول/سلم/وصل/بعت...
+    var actionVerbs = '(?:يعطي|تعطي|اعطي|هيدي|يدي|ادي|تدي|هتدي|دفع|يدفع|تدفع|هيدفع|هتدفع|ادفع|حول|يحول|تحول|هيحول|هتحول|سلم|يسلم|تسلم|هيسلم|هتسلم|وصل|يوصل|توصل|هيوصل|هتوصل|بعت|يبعت|تبعت|هيبعت|هتبعت)';
+    var givePattern = new RegExp(actionVerbs + '\\s+(?:ل)?([^\\d٠-٩]+?)\\s*(\\d+)', 'gi');
     var giveMatch;
     while ((giveMatch = givePattern.exec(distributionPart)) !== null) {
-      var giveRecipient = giveMatch[1].trim().replace(/^ل/, '');
+      var giveRecipient = giveMatch[1].trim().replace(/^ل/, '').replace(/\s+$/, '');
       var giveAmount = parseInt(giveMatch[2]);
+
+      // تنظيف اسم المستلم
+      giveRecipient = giveRecipient.replace(/^(?:ال|لل|ل)/, '').trim();
 
       // التحقق من عدم التكرار: نفس المبلغ + نفس المستلم
       var giveExists = false;
@@ -1850,12 +1932,16 @@ function parseCompoundTransfer(text) {
       }
 
       if (giveAmount > 0 && giveRecipient.length > 0 && !giveExists) {
+        // التحقق إذا كان المستلم هو "جمعية" أو "قسط جمعية"
+        var isAssociation = /جمعي|قسط/i.test(giveRecipient);
+
         distributions.push({
           amount: giveAmount,
           recipient: giveRecipient,
-          isCustody: false
+          isCustody: false,
+          isAssociation: isAssociation
         });
-        Logger.log('Give pattern: ' + giveAmount + ' -> ' + giveRecipient);
+        Logger.log('Give pattern: ' + giveAmount + ' -> ' + giveRecipient + (isAssociation ? ' (جمعية)' : ''));
       }
     }
 
@@ -2017,29 +2103,56 @@ function parseCompoundTransfer(text) {
 
         // محاولة تطبيع اسم الجهة
         // نستخدم التصنيفات من شيت التصنيفات فقط
-        if (/مرات[يه]|زوجت[يه]|الزوج[هة]/i.test(dist.recipient)) {
+
+        // ===== التحقق من الجمعية أولاً =====
+        if (dist.isAssociation || /جمعي|قسط\s*جمعي/i.test(dist.recipient)) {
+          contactName = 'جمعية';
+          // البحث عن تصنيف "قسط جمعية" في الشيت
+          category = findMatchingCategory('قسط جمعية', 'تحويل');
+          if (!category) {
+            category = findMatchingCategory('جمعية', 'تحويل');
+          }
+          if (!category) {
+            // البحث في كل التصنيفات عن أي شيء يحتوي على "جمعية"
+            for (var jc = 0; jc < transferCategories.length; jc++) {
+              if (/جمعي/i.test(transferCategories[jc].كود)) {
+                category = transferCategories[jc].كود;
+                break;
+              }
+            }
+          }
+          recipientDisplay = 'قسط جمعية';
+          Logger.log('Association payment detected: ' + dist.amount);
+        }
+        // ===== التحقق من الزوجة =====
+        else if (/مرات[يه]|زوجت[يه]|الزوج[هة]/i.test(dist.recipient)) {
           contactName = normalizeContactName('الزوجة') || 'Om Celia';
           category = findMatchingCategory('زوجة', 'تحويل');
           recipientDisplay = 'زوجتي';
-        } else if (/مصطف[يى]/i.test(dist.recipient)) {
-          // مصطفى هو أمين العهدة - يأخذ لنفسه
+        }
+        // ===== التحقق من مصطفى =====
+        else if (/مصطف[يى]/i.test(dist.recipient)) {
           contactName = normalizeContactName('مصطفى') || 'مصطفى';
           category = findMatchingCategory('الأهل', 'تحويل');
           recipientDisplay = 'مصطفى';
-        } else if (/سار[هة]/i.test(dist.recipient)) {
+        }
+        // ===== التحقق من سارة =====
+        else if (/سار[هة]/i.test(dist.recipient)) {
           contactName = normalizeContactName('سارة') || 'سارة';
           category = findMatchingCategory('الأهل', 'تحويل');
           recipientDisplay = 'سارة';
-        } else if (/اهل|أهل|عائل[هة]/i.test(dist.recipient)) {
+        }
+        // ===== التحقق من الأهل =====
+        else if (/اهل|أهل|عائل[هة]/i.test(dist.recipient)) {
           contactName = normalizeContactName(dist.recipient) || dist.recipient;
           category = findMatchingCategory('الأهل', 'تحويل');
-        } else {
-          // محاولة البحث عن الجهة والتصنيف
+        }
+        // ===== محاولة البحث عن الجهة والتصنيف =====
+        else {
           var normalizedContact = normalizeContactName(dist.recipient);
           if (normalizedContact) {
             contactName = normalizedContact;
           }
-          // البحث عن تصنيف مطابق للمستلم
           category = findMatchingCategory(dist.recipient, 'تحويل');
         }
 
