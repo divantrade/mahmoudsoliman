@@ -677,25 +677,34 @@ function processAssociationDirectly(chatId, text, user) {
     }
 
     // حساب المبلغ الإجمالي
-    var totalAmount = parsedAssoc.installment * parsedAssoc.duration;
+    var totalAmount = parsedAssoc.totalCollection || (parsedAssoc.installment * parsedAssoc.duration);
+
+    // تحديد الشخص المسؤول
+    var responsiblePerson = parsedAssoc.responsiblePerson || user.name;
 
     // بناء رسالة المعاينة
     var previewMsg = '🤝 *جمعية جديدة*\n';
     previewMsg += '═══════════════════\n\n';
+    previewMsg += '📋 الاسم: ' + parsedAssoc.name + '\n';
+    if (responsiblePerson) {
+      previewMsg += '👤 المسؤول: ' + responsiblePerson + '\n';
+    }
     previewMsg += '💰 قيمة القسط: ' + parsedAssoc.installment.toLocaleString() + ' جنيه\n';
     previewMsg += '📅 شهر البداية: ' + parsedAssoc.startMonth + '/' + currentYear + '\n';
     previewMsg += '🔢 المدة: ' + parsedAssoc.duration + ' شهر\n';
     previewMsg += '🎯 ترتيب القبض: ' + parsedAssoc.collectionOrder + '\n';
     previewMsg += '📆 تاريخ القبض المتوقع: ' + collectionMonth + '/' + collectionYear + '\n';
-    previewMsg += '💵 المبلغ المتوقع قبضه: ' + totalAmount.toLocaleString() + ' جنيه\n\n';
+    previewMsg += '💵 إجمالي القبض: ' + totalAmount.toLocaleString() + ' جنيه\n\n';
     previewMsg += '═══════════════════';
 
     // إنشاء أزرار التأكيد والإلغاء
     var assocDataStr = JSON.stringify({
       type: 'association',
       name: parsedAssoc.name,
+      responsible: responsiblePerson,
       installment: parsedAssoc.installment,
       duration: parsedAssoc.duration,
+      totalCollection: totalAmount,
       startMonth: parsedAssoc.startMonth,
       collectionOrder: parsedAssoc.collectionOrder,
       user_name: user.name,
@@ -1226,7 +1235,7 @@ function handleConfirmAssociation(chatId, data, user) {
       duration: assocData.duration,
       startMonth: assocData.startMonth,
       collectionOrder: assocData.collectionOrder,
-      responsible: user.name
+      responsible: assocData.responsible || user.name
     });
 
     if (result.success) {
@@ -1239,15 +1248,18 @@ function handleConfirmAssociation(chatId, data, user) {
         collectionYear++;
       }
 
-      var totalAmount = assocData.installment * assocData.duration;
+      var totalAmount = assocData.totalCollection || (assocData.installment * assocData.duration);
 
       var successMsg = '✅ *تم تسجيل الجمعية بنجاح!*\n\n';
       successMsg += '📋 الاسم: ' + assocData.name + '\n';
+      if (assocData.responsible) {
+        successMsg += '👤 المسؤول: ' + assocData.responsible + '\n';
+      }
       successMsg += '💰 القسط الشهري: ' + assocData.installment.toLocaleString() + ' جنيه\n';
       successMsg += '🔢 المدة: ' + assocData.duration + ' شهر\n';
       successMsg += '🎯 ترتيب القبض: ' + assocData.collectionOrder + '\n';
       successMsg += '📅 موعد القبض: ' + collectionMonth + '/' + collectionYear + '\n';
-      successMsg += '💵 ستقبض: ' + totalAmount.toLocaleString() + ' جنيه\n\n';
+      successMsg += '💵 إجمالي القبض: ' + totalAmount.toLocaleString() + ' جنيه\n\n';
       successMsg += '📝 يمكنك تسجيل أقساط من القائمة: 🤝 الجمعيات';
 
       sendMessage(chatId, successMsg);
