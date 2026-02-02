@@ -413,65 +413,74 @@ function findMatchingCategory(keyword, type) {
 
     if (allCategories.length === 0) {
       Logger.log('No categories found in sheet');
-      return 'متنوع';
+      return null;
     }
 
     // تطبيع الكلمة المفتاحية للمقارنة
     var normalizedKeyword = keyword.replace(/[ةه]/g, 'ه')
                                    .replace(/[يى]/g, 'ي')
                                    .replace(/[أإآا]/g, 'ا')
-                                   .toLowerCase();
+                                   .trim();
 
     Logger.log('Finding category for keyword: ' + keyword + ' (normalized: ' + normalizedKeyword + ')');
+    Logger.log('Available categories: ' + allCategories.map(function(c) { return c.كود; }).join(', '));
 
-    // البحث عن تطابق
+    // المرحلة 1: البحث عن تطابق تام
     for (var i = 0; i < allCategories.length; i++) {
       var cat = allCategories[i];
       var normalizedCode = cat.كود.replace(/[ةه]/g, 'ه')
                                   .replace(/[يى]/g, 'ي')
                                   .replace(/[أإآا]/g, 'ا')
-                                  .toLowerCase();
-      var normalizedName = (cat.اسم || '').replace(/[ةه]/g, 'ه')
-                                          .replace(/[يى]/g, 'ي')
-                                          .replace(/[أإآا]/g, 'ا')
-                                          .toLowerCase();
+                                  .trim();
 
-      // البحث عن الكلمة المفتاحية في الكود أو الاسم
-      if (normalizedCode.indexOf(normalizedKeyword) !== -1 ||
-          normalizedKeyword.indexOf(normalizedCode) !== -1 ||
-          normalizedName.indexOf(normalizedKeyword) !== -1) {
-        Logger.log('Found matching category: ' + cat.كود);
-        return cat.كود; // إرجاع الكود الأصلي من الشيت
+      if (normalizedCode === normalizedKeyword) {
+        Logger.log('Exact match found: ' + cat.كود);
+        return cat.كود;
       }
     }
 
-    // البحث بالكلمات المفتاحية الشائعة
+    // المرحلة 2: البحث بالكلمات المفتاحية المحددة
+    // زوجة/مراتي -> مصروفات الزوجة
     if (/زوج|مرات/i.test(normalizedKeyword)) {
-      // البحث عن تصنيف الزوجة
       for (var j = 0; j < allCategories.length; j++) {
-        if (/زوج/i.test(allCategories[j].كود)) {
-          Logger.log('Found wife category: ' + allCategories[j].كود);
-          return allCategories[j].كود;
+        var code = allCategories[j].كود;
+        if (/مصروفات.*زوج|زوج.*مصروفات/i.test(code)) {
+          Logger.log('Found wife expenses category: ' + code);
+          return code;
         }
       }
     }
 
-    if (/اهل|عائل/i.test(normalizedKeyword)) {
-      // البحث عن تصنيف الأهل
+    // أهل/عائلة -> مساعدة الأهل
+    if (/اهل|أهل|عائل/i.test(normalizedKeyword)) {
       for (var k = 0; k < allCategories.length; k++) {
-        if (/اهل|أهل/i.test(allCategories[k].كود)) {
-          Logger.log('Found family category: ' + allCategories[k].كود);
-          return allCategories[k].كود;
+        var code2 = allCategories[k].كود;
+        if (/مساعد.*اهل|مساعد.*أهل/i.test(code2)) {
+          Logger.log('Found family help category: ' + code2);
+          return code2;
         }
       }
     }
 
-    Logger.log('No matching category found, returning default');
-    return 'متنوع';
+    // عهدة [اسم] -> عهدة [اسم] أو إيداع عهدة
+    if (/عهد/i.test(normalizedKeyword)) {
+      for (var m = 0; m < allCategories.length; m++) {
+        var code3 = allCategories[m].كود;
+        var normalizedCode3 = code3.replace(/[ةه]/g, 'ه').replace(/[يى]/g, 'ي').replace(/[أإآا]/g, 'ا');
+        // تطابق تام مع التطبيع
+        if (normalizedCode3 === normalizedKeyword) {
+          Logger.log('Found custody category: ' + code3);
+          return code3;
+        }
+      }
+    }
+
+    Logger.log('No matching category found for: ' + keyword);
+    return null;
 
   } catch (error) {
     Logger.log('Error finding category: ' + error.toString());
-    return 'متنوع';
+    return null;
   }
 }
 
@@ -1946,16 +1955,32 @@ function parseCompoundTransfer(text) {
 
     // إنشاء المعاملات
     // 1. معاملة إيداع العهدة الرئيسية
-    // البحث عن تصنيف العهدة من الشيت (مثل: عهدة مصطفى)
-    var custodyCategory = findMatchingCategory('عهدة ' + result.custodian, 'عهدة');
-    if (custodyCategory === 'متنوع') {
-      // إذا لم يجد، جرب البحث باسم الأمين فقط
-      custodyCategory = findMatchingCategory(result.custodian, 'عهدة');
+    // البحث عن تصنيف من شيت التصنيفات نوع "تحويل"
+    // مثل: حواله، أو عهدة [اسم] إذا موجود
+    var custodyCategory = findMatchingCategory('عهدة ' + result.custodian, 'تحويل');
+    if (!custodyCategory) {
+      // جرب البحث عن "حواله" كتصنيف افتراضي للإيداع
+      custodyCategory = findMatchingCategory('حواله', 'تحويل');
     }
-    if (custodyCategory === 'متنوع') {
-      // الافتراضي
-      custodyCategory = 'عهدة ' + result.custodian;
+    if (!custodyCategory) {
+      // البحث في كل التصنيفات
+      var allCats = getCategoriesFromSheet('تحويل');
+      if (allCats && allCats.length > 0) {
+        // استخدم أول تصنيف متاح أو "متنوع"
+        for (var ci = 0; ci < allCats.length; ci++) {
+          if (allCats[ci].كود === 'متنوع' || allCats[ci].كود === 'حواله') {
+            custodyCategory = allCats[ci].كود;
+            break;
+          }
+        }
+        if (!custodyCategory) {
+          custodyCategory = allCats[0].كود; // أول تصنيف متاح
+        }
+      } else {
+        custodyCategory = 'حواله'; // الافتراضي
+      }
     }
+    Logger.log('Custody deposit category: ' + custodyCategory);
 
     result.transactions.push({
       type: 'إيداع_عهدة',
@@ -1970,17 +1995,28 @@ function parseCompoundTransfer(text) {
     });
 
     // 2. معاملات الصرف لكل توزيع (ما عدا العهدة)
+    // قراءة تصنيفات التحويل مرة واحدة
+    var transferCategories = getCategoriesFromSheet('تحويل');
+    var defaultCategory = 'متنوع';
+    // البحث عن تصنيف افتراضي في الشيت
+    for (var dc = 0; dc < transferCategories.length; dc++) {
+      if (transferCategories[dc].كود === 'متنوع') {
+        defaultCategory = 'متنوع';
+        break;
+      }
+    }
+
     for (var i = 0; i < result.distributions.length; i++) {
       var dist = result.distributions[i];
 
       if (!dist.isCustody) {
         // تحديد الجهة من اسم المستلم
         var contactName = dist.recipient;
-        var category = '';
+        var category = null;
         var recipientDisplay = dist.recipient;
 
         // محاولة تطبيع اسم الجهة
-        // نستخدم التصنيفات من شيت التصنيفات
+        // نستخدم التصنيفات من شيت التصنيفات فقط
         if (/مرات[يه]|زوجت[يه]|الزوج[هة]/i.test(dist.recipient)) {
           contactName = normalizeContactName('الزوجة') || 'Om Celia';
           category = findMatchingCategory('زوجة', 'تحويل');
@@ -2005,6 +2041,12 @@ function parseCompoundTransfer(text) {
           }
           // البحث عن تصنيف مطابق للمستلم
           category = findMatchingCategory(dist.recipient, 'تحويل');
+        }
+
+        // إذا لم يجد تصنيف، استخدم الافتراضي من الشيت
+        if (!category) {
+          category = defaultCategory;
+          Logger.log('No category found for ' + dist.recipient + ', using default: ' + category);
         }
 
         result.transactions.push({
