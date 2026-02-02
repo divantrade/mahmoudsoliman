@@ -890,16 +890,19 @@ function calculateCustodyBalanceFromTransactions(custodian) {
     Logger.log('Looking for custodian: ' + custodianName);
     Logger.log('Total rows in sheet: ' + data.length);
 
-    // Headers: ID, التاريخ, الوقت, النوع, التصنيف, المبلغ, العملة, المبلغ_المستلم, عملة_الاستلام, سعر_الصرف, جهة_الاتصال, ...
+    // Headers: ID, التاريخ, الوقت, النوع, التصنيف, المبلغ, العملة, المبلغ_المستلم, عملة_الاستلام, سعر_الصرف, جهة_الاتصال, الوصف, ...
     for (var i = 1; i < data.length; i++) {
       var type = data[i][3]; // النوع
       var contact = data[i][10] || ''; // جهة_الاتصال
       var category = data[i][4] || ''; // التصنيف
+      var description = data[i][11] || ''; // الوصف
 
       // التحقق من أن الحركة لأمين العهدة المحدد
-      // نبحث في جهة الاتصال والتصنيف معاً
+      // نبحث في جهة الاتصال والتصنيف والوصف
       var isMatch = isCustodianMatch(contact, custodianName) ||
-                    isCustodianMatch(category, custodianName);
+                    isCustodianMatch(category, custodianName) ||
+                    (description.indexOf('عهدة ' + custodianName) !== -1) ||
+                    (description.indexOf('عهده ' + custodianName) !== -1);
 
       if (!isMatch) {
         continue;
@@ -1062,10 +1065,14 @@ function updateCustodyReportSheet(custodian) {
       var type = data[i][3];
       var contact = data[i][10] || '';
       var category = data[i][4] || '';
+      var description = data[i][11] || '';
 
       // التحقق من أن الحركة لأمين العهدة المحدد
+      // نفحص: جهة الاتصال، التصنيف، والوصف
       var isMatch = isCustodianMatch(contact, custodianName) ||
-                    isCustodianMatch(category, custodianName);
+                    isCustodianMatch(category, custodianName) ||
+                    (description.indexOf('عهدة ' + custodianName) !== -1) ||
+                    (description.indexOf('عهده ' + custodianName) !== -1);
 
       if (!isMatch) continue;
 
@@ -1731,9 +1738,13 @@ function parseCompoundTransfer(text) {
       var giveRecipient = giveMatch[1].trim().replace(/^ل/, '');
       var giveAmount = parseInt(giveMatch[2]);
 
+      // التحقق من عدم التكرار: نفس المبلغ + نفس المستلم
       var giveExists = false;
       for (var gi = 0; gi < distributions.length; gi++) {
-        if (distributions[gi].amount === giveAmount) { giveExists = true; break; }
+        if (distributions[gi].amount === giveAmount && distributions[gi].recipient === giveRecipient) {
+          giveExists = true;
+          break;
+        }
       }
 
       if (giveAmount > 0 && giveRecipient.length > 0 && !giveExists) {
@@ -1751,20 +1762,25 @@ function parseCompoundTransfer(text) {
     var takeMatch;
     while ((takeMatch = takePattern.exec(distributionPart)) !== null) {
       var takeAmount = parseInt(takeMatch[1]);
+      var takeRecipient = result.custodian;
 
+      // التحقق من عدم التكرار: نفس المبلغ + نفس المستلم
       var takeExists = false;
       for (var ti = 0; ti < distributions.length; ti++) {
-        if (distributions[ti].amount === takeAmount) { takeExists = true; break; }
+        if (distributions[ti].amount === takeAmount && distributions[ti].recipient === takeRecipient) {
+          takeExists = true;
+          break;
+        }
       }
 
       if (takeAmount > 0 && !takeExists) {
         distributions.push({
           amount: takeAmount,
-          recipient: result.custodian,
+          recipient: takeRecipient,
           isCustody: false,
           forSelf: true
         });
-        Logger.log('Take pattern (self): ' + takeAmount + ' -> ' + result.custodian);
+        Logger.log('Take pattern (self): ' + takeAmount + ' -> ' + takeRecipient);
       }
     }
 
@@ -1779,9 +1795,13 @@ function parseCompoundTransfer(text) {
       if (!recVal || recVal.length < 2) continue;
       if (/^(?:و|ال|في|من)$/.test(recVal)) continue;
 
+      // التحقق من عدم التكرار: نفس المبلغ + نفس المستلم
       var amtExists = false;
       for (var ai = 0; ai < distributions.length; ai++) {
-        if (distributions[ai].amount === amtVal) { amtExists = true; break; }
+        if (distributions[ai].amount === amtVal && distributions[ai].recipient === recVal) {
+          amtExists = true;
+          break;
+        }
       }
 
       if (amtVal > 0 && !amtExists) {
