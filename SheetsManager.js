@@ -2059,6 +2059,69 @@ function parseCompoundTransfer(text) {
       }
     }
 
+    // ===== نمط التوزيع المتداخل (جديد) =====
+    // مثال: "يدفع لسارة مراتي 4000 جنيه منهم 1500 جمعية"
+    // الكلمات المفتاحية للتداخل
+    var nestedKeywords = /(?:منهم|منها|فيهم|فيها|ضمنهم|ضمنها|داخلهم|داخلها|من\s*ضمنهم|من\s*ضمنها|يخصم\s*منهم|يخصم\s*منها|خصم\s*منهم|خصم\s*منها)/i;
+
+    // البحث عن التوزيعات المتداخلة في النص الأصلي
+    // نمط: [شخص] [مبلغ] [عملة]? [كلمة تداخل] [مبلغ فرعي] [تصنيف فرعي]
+    var nestedPattern = /([^\d٠-٩]+?)\s*(\d+)\s*(?:جنيه|ريال)?\s*(?:منهم|منها|فيهم|فيها|ضمنهم|ضمنها|داخلهم|داخلها|من\s*ضمنهم|من\s*ضمنها|يخصم\s*منهم|يخصم\s*منها|خصم\s*منهم|خصم\s*منها)\s*(\d+)\s*([^\d٠-٩\s][^\d٠-٩]*?)(?=\s*(?:و|$|\d))/gi;
+
+    var nestedMatch;
+    var nestedDistributions = [];
+
+    while ((nestedMatch = nestedPattern.exec(distributionPart)) !== null) {
+      var parentRecipient = nestedMatch[1].trim();
+      var parentAmount = parseInt(nestedMatch[2]);
+      var nestedAmount = parseInt(nestedMatch[3]);
+      var nestedRecipient = nestedMatch[4].trim();
+
+      // تنظيف
+      parentRecipient = parentRecipient.replace(/^(?:ل|لل|ال|يدفع|تدفع|يعطي|تعطي|اعطي)\s*/i, '').trim();
+      nestedRecipient = nestedRecipient.replace(/\s*(?:جنيه|ريال|دولار)$/i, '').trim();
+
+      // التحقق من صحة البيانات
+      if (parentAmount > 0 && nestedAmount > 0 && nestedAmount < parentAmount && nestedRecipient.length > 1) {
+        Logger.log('=== Nested distribution found ===');
+        Logger.log('Parent: ' + parentRecipient + ' = ' + parentAmount);
+        Logger.log('Nested: ' + nestedRecipient + ' = ' + nestedAmount);
+        Logger.log('Remaining for parent: ' + (parentAmount - nestedAmount));
+
+        // البحث عن التوزيع الأصلي وتعديله
+        var foundParent = false;
+        for (var nd = 0; nd < distributions.length; nd++) {
+          if (distributions[nd].amount === parentAmount) {
+            // وجدنا التوزيع الأصلي - نعدّل المبلغ
+            distributions[nd].amount = parentAmount - nestedAmount;
+            distributions[nd].hasNested = true;
+            foundParent = true;
+            Logger.log('Updated parent distribution: ' + distributions[nd].amount);
+            break;
+          }
+        }
+
+        // إضافة التوزيع الفرعي
+        var isNestedAssociation = /جمعي|قسط/i.test(nestedRecipient);
+        nestedDistributions.push({
+          amount: nestedAmount,
+          recipient: nestedRecipient,
+          isCustody: false,
+          isAssociation: isNestedAssociation,
+          isNested: true,
+          parentRecipient: parentRecipient
+        });
+        Logger.log('Added nested distribution: ' + nestedAmount + ' -> ' + nestedRecipient);
+      }
+    }
+
+    // دمج التوزيعات المتداخلة مع التوزيعات الأصلية
+    for (var ni = 0; ni < nestedDistributions.length; ni++) {
+      distributions.push(nestedDistributions[ni]);
+    }
+
+    Logger.log('After nested processing: ' + distributions.length + ' distributions');
+
     // ===== نمط 4: "الباقي عهده" أو "والباقي عهده" أو "وعهده الباقي" =====
     var hasCustodyRemainder = /(?:و)?(?:ال)?باقي\s*عهد|عهده?\s*(?:ال)?باقي/i.test(distributionPart);
 
