@@ -1951,6 +1951,8 @@ function parseCompoundTransfer(text) {
     // أفعال موسعة: يعطي/تعطي/اعطي/هيدي/ادي/دفع/يدفع/تدفع/حول/سلم/وصل/بعت...
     var actionVerbs = '(?:يعطي|تعطي|اعطي|هيدي|يدي|ادي|تدي|هتدي|دفع|يدفع|تدفع|هيدفع|هتدفع|ادفع|حول|يحول|تحول|هيحول|هتحول|سلم|يسلم|تسلم|هيسلم|هتسلم|وصل|يوصل|توصل|هيوصل|هتوصل|بعت|يبعت|تبعت|هيبعت|هتبعت)';
     var givePattern = new RegExp(actionVerbs + '\\s+(?:ل)?([^\\d٠-٩]+?)\\s*(\\d+)', 'gi');
+    // قائمة العملات لتجاهلها
+    var currencyExclude = /^(?:جنيه|ريال|دولار|مصري|سعودي)$/i;
     var giveMatch;
     while ((giveMatch = givePattern.exec(distributionPart)) !== null) {
       var giveRecipient = giveMatch[1].trim().replace(/^ل/, '').replace(/\s+$/, '');
@@ -1958,6 +1960,15 @@ function parseCompoundTransfer(text) {
 
       // تنظيف اسم المستلم
       giveRecipient = giveRecipient.replace(/^(?:ال|لل|ل)/, '').trim();
+
+      // ⭐ إزالة كلمات العملة من نهاية اسم المستلم
+      giveRecipient = giveRecipient.replace(/\s*(?:جنيه|ريال|دولار|مصري|سعودي)\s*$/i, '').trim();
+
+      // ⭐ تجاهل إذا كان المستلم عملة فقط
+      if (currencyExclude.test(giveRecipient) || giveRecipient.length < 2) {
+        Logger.log('Skipping currency/short recipient: ' + giveRecipient);
+        continue;
+      }
 
       // التحقق من عدم التكرار: نفس المبلغ + نفس المستلم
       var giveExists = false;
@@ -2010,15 +2021,22 @@ function parseCompoundTransfer(text) {
     }
 
     // ===== نمط 3: "[مبلغ] ل[شخص]" =====
+    // تجاهل العملات
+    var currencyWords = /^(?:جنيه|ريال|دولار|مصري|سعودي)$/i;
     var amountFirstPattern = /(\d+)\s*(?:ل|الى|إلى)?\s*([^\d٠-٩\s][^\d٠-٩و]*?)(?=\s*(?:و|$))/gi;
     var amountMatch;
     while ((amountMatch = amountFirstPattern.exec(distributionPart)) !== null) {
       var amtVal = parseInt(amountMatch[1]);
       var recVal = amountMatch[2].trim().replace(/^ل/, '');
 
-      // تجاهل الكلمات المفتاحية والقصيرة
+      // تجاهل الكلمات المفتاحية والقصيرة والعملات
       if (!recVal || recVal.length < 2) continue;
       if (/^(?:و|ال|في|من)$/.test(recVal)) continue;
+      // ⭐ تجاهل العملات
+      if (currencyWords.test(recVal)) {
+        Logger.log('Skipping currency word: ' + recVal);
+        continue;
+      }
 
       // التحقق من عدم التكرار: نفس المبلغ + نفس المستلم
       var amtExists = false;
