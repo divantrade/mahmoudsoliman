@@ -102,6 +102,10 @@ function getSheetHeaders(sheetName) {
     'تقرير_عهدة_مصطفى': [
       'التاريخ', 'الوقت', 'النوع', 'المبلغ', 'العملة', 'التصنيف',
       'الوصف', 'سعر_الصرف', 'الرصيد_المتبقي'
+    ],
+    'تقرير_عهدة_ام_سيليا': [
+      'التاريخ', 'الوقت', 'النوع', 'المبلغ', 'العملة', 'التصنيف',
+      'الوصف', 'سعر_الصرف', 'الرصيد_المتبقي'
     ]
   };
 
@@ -1158,7 +1162,7 @@ function getCustodyReport(custodian) {
 /**
  * ⭐ تحديث شيت تقرير العهدة لأمين معين
  * يقرأ من شيت الحركات ويكتب في شيت التقرير
- * @param {string} custodian - اسم أمين العهدة (سارة أو مصطفى)
+ * @param {string} custodian - اسم أمين العهدة (سارة أو مصطفى أو ام سيليا)
  * @returns {Object} نتيجة التحديث
  */
 function updateCustodyReportSheet(custodian) {
@@ -1173,6 +1177,9 @@ function updateCustodyReportSheet(custodian) {
     } else if (isCustodianMatch(custodianName, 'مصطفى')) {
       sheetName = SHEETS.CUSTODY_REPORT_MOSTAFA;
       custodianName = 'مصطفى';
+    } else if (isCustodianMatch(custodianName, 'ام سيليا') || isCustodianMatch(custodianName, 'أم سيليا') || /ام\s*سيليا|أم\s*سيليا|om\s*celia/i.test(custodianName)) {
+      sheetName = SHEETS.CUSTODY_REPORT_OM_CELIA;
+      custodianName = 'ام سيليا';
     } else {
       return { success: false, message: 'أمين العهدة غير معروف: ' + custodian };
     }
@@ -1317,7 +1324,7 @@ function updateCustodyReportSheet(custodian) {
 }
 
 /**
- * ⭐ تحديث جميع تقارير العهدة (سارة ومصطفى)
+ * ⭐ تحديث جميع تقارير العهدة (سارة ومصطفى وام سيليا)
  * @returns {Object} نتيجة التحديث
  */
 function updateAllCustodyReports() {
@@ -1326,12 +1333,14 @@ function updateAllCustodyReports() {
 
     var saraResult = updateCustodyReportSheet('سارة');
     var mostafaResult = updateCustodyReportSheet('مصطفى');
+    var omCeliaResult = updateCustodyReportSheet('ام سيليا');
 
     return {
       success: true,
       message: 'تم تحديث جميع تقارير العهدة',
       sara: saraResult,
-      mostafa: mostafaResult
+      mostafa: mostafaResult,
+      omCelia: omCeliaResult
     };
 
   } catch (error) {
@@ -1356,6 +1365,9 @@ function getCustodyReportSummary(custodian) {
     } else if (isCustodianMatch(custodianName, 'مصطفى')) {
       sheetName = SHEETS.CUSTODY_REPORT_MOSTAFA;
       custodianName = 'مصطفى';
+    } else if (isCustodianMatch(custodianName, 'ام سيليا') || isCustodianMatch(custodianName, 'أم سيليا') || /ام\s*سيليا|أم\s*سيليا|om\s*celia/i.test(custodianName)) {
+      sheetName = SHEETS.CUSTODY_REPORT_OM_CELIA;
+      custodianName = 'ام سيليا';
     } else {
       return null;
     }
