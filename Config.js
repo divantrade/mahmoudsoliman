@@ -26,7 +26,14 @@ const CONFIG = {
   TELEGRAM_API_URL: 'https://api.telegram.org/bot',
 
   // Gemini API URL
-  GEMINI_API_URL: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'
+  GEMINI_API_URL: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+
+  // ============== كلمة السر لحماية النظام ==============
+  // غيّر هذه الكلمة لحماية إنشاء الشيتات
+  ADMIN_PASSWORD: 'mahmoud2024',
+
+  // ============== مجلد النسخ الاحتياطي ==============
+  BACKUP_FOLDER_ID: '1FS5n_YB1BNM-fXi0Y4tpvVeeqflZ3ffv'
 };
 
 // ============== Sheet Names ==============

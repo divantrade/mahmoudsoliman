@@ -109,13 +109,28 @@ function getSheetHeaders(sheetName) {
 }
 
 /**
- * إنشاء جميع الشيتات
+ * التحقق من كلمة السر
+ * @param {string} password - كلمة السر المُدخلة
+ * @returns {boolean} صحيح إذا كانت كلمة السر صحيحة
  */
-function initializeAllSheets() {
+function verifyAdminPassword(password) {
+  return password === CONFIG.ADMIN_PASSWORD;
+}
+
+/**
+ * إنشاء جميع الشيتات (محمي بكلمة سر)
+ * @param {string} password - كلمة السر للتحقق
+ */
+function initializeAllSheets(password) {
+  // التحقق من كلمة السر
+  if (!password || !verifyAdminPassword(password)) {
+    throw new Error('⛔ كلمة السر غير صحيحة! لا يمكن إنشاء الشيتات.');
+  }
+
   const sheetNames = Object.values(SHEETS);
 
   sheetNames.forEach(sheetName => {
-    getOrCreateSheet(sheetName);
+    getOrCreateSheetProtected(sheetName, password);
   });
 
   // إضافة البيانات الافتراضية
@@ -126,7 +141,29 @@ function initializeAllSheets() {
   // إضافة القوائم المنسدلة
   addDropdownValidations();
 
-  return 'تم إنشاء جميع الشيتات بنجاح!';
+  return '✅ تم إنشاء جميع الشيتات بنجاح!';
+}
+
+/**
+ * إنشاء شيت محمي بكلمة سر (للاستخدام الداخلي فقط)
+ * @param {string} sheetName - اسم الشيت
+ * @param {string} password - كلمة السر
+ */
+function getOrCreateSheetProtected(sheetName, password) {
+  if (!password || !verifyAdminPassword(password)) {
+    throw new Error('⛔ كلمة السر غير صحيحة! لا يمكن إنشاء الشيت.');
+  }
+
+  const ss = getSpreadsheet();
+  let sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+    initializeSheet(sheet, sheetName);
+    Logger.log('✅ تم إنشاء شيت: ' + sheetName);
+  }
+
+  return sheet;
 }
 
 /**
@@ -2182,4 +2219,238 @@ function parseCompoundTransfer(text) {
     Logger.log('Error in parseCompoundTransfer: ' + error.toString());
     return null;
   }
+}
+
+// =====================================================
+// ============== نظام النسخ الاحتياطي ==============
+// =====================================================
+
+/**
+ * إنشاء نسخة احتياطية من الـ Spreadsheet
+ * يتم حفظها في مجلد Google Drive المحدد
+ * @returns {string} رسالة تأكيد أو خطأ
+ */
+function createBackup() {
+  try {
+    var ss = getSpreadsheet();
+    var backupFolderId = CONFIG.BACKUP_FOLDER_ID;
+
+    // التأكد من وجود معرف المجلد
+    if (!backupFolderId) {
+      Logger.log('❌ لم يتم تحديد مجلد النسخ الاحتياطي في الإعدادات');
+      return 'خطأ: لم يتم تحديد مجلد النسخ الاحتياطي';
+    }
+
+    // الحصول على المجلد
+    var folder;
+    try {
+      folder = DriveApp.getFolderById(backupFolderId);
+    } catch (e) {
+      Logger.log('❌ لا يمكن الوصول لمجلد النسخ الاحتياطي: ' + e.toString());
+      return 'خطأ: لا يمكن الوصول لمجلد النسخ الاحتياطي';
+    }
+
+    // إنشاء اسم الملف بالتاريخ والوقت
+    var now = new Date();
+    var dateStr = Utilities.formatDate(now, 'Africa/Cairo', 'yyyy-MM-dd');
+    var timeStr = Utilities.formatDate(now, 'Africa/Cairo', 'HH-mm');
+    var backupName = 'نسخة احتياطية - ' + ss.getName() + ' - ' + dateStr + ' - ' + timeStr;
+
+    // إنشاء نسخة من الـ Spreadsheet
+    var backupFile = DriveApp.getFileById(ss.getId()).makeCopy(backupName, folder);
+
+    Logger.log('✅ تم إنشاء نسخة احتياطية: ' + backupName);
+    Logger.log('📁 معرف الملف: ' + backupFile.getId());
+
+    // حذف النسخ الاحتياطية القديمة (الاحتفاظ بآخر 30 نسخة فقط)
+    cleanupOldBackups(folder, 30);
+
+    return '✅ تم إنشاء النسخة الاحتياطية بنجاح\n📁 ' + backupName;
+
+  } catch (error) {
+    Logger.log('❌ خطأ في إنشاء النسخة الاحتياطية: ' + error.toString());
+    return 'خطأ: ' + error.toString();
+  }
+}
+
+/**
+ * حذف النسخ الاحتياطية القديمة (الاحتفاظ بعدد معين فقط)
+ * @param {Folder} folder - مجلد النسخ الاحتياطية
+ * @param {number} keepCount - عدد النسخ المراد الاحتفاظ بها
+ */
+function cleanupOldBackups(folder, keepCount) {
+  try {
+    var files = folder.getFiles();
+    var backupFiles = [];
+
+    // جمع ملفات النسخ الاحتياطية
+    while (files.hasNext()) {
+      var file = files.next();
+      if (file.getName().indexOf('نسخة احتياطية') !== -1) {
+        backupFiles.push({
+          file: file,
+          date: file.getDateCreated()
+        });
+      }
+    }
+
+    // ترتيب حسب التاريخ (الأحدث أولاً)
+    backupFiles.sort(function(a, b) {
+      return b.date - a.date;
+    });
+
+    // حذف الملفات الزائدة
+    if (backupFiles.length > keepCount) {
+      for (var i = keepCount; i < backupFiles.length; i++) {
+        Logger.log('🗑️ حذف نسخة قديمة: ' + backupFiles[i].file.getName());
+        backupFiles[i].file.setTrashed(true);
+      }
+      Logger.log('✅ تم حذف ' + (backupFiles.length - keepCount) + ' نسخة قديمة');
+    }
+
+  } catch (error) {
+    Logger.log('⚠️ خطأ في تنظيف النسخ القديمة: ' + error.toString());
+  }
+}
+
+/**
+ * إعداد الـ Trigger للنسخ الاحتياطي التلقائي
+ * يتم تشغيله مرة واحدة لإعداد النسخ الاحتياطي اليومي
+ * @param {string} password - كلمة السر للتحقق
+ */
+function setupDailyBackupTrigger(password) {
+  // التحقق من كلمة السر
+  if (!password || !verifyAdminPassword(password)) {
+    throw new Error('⛔ كلمة السر غير صحيحة! لا يمكن إعداد النسخ الاحتياطي.');
+  }
+
+  try {
+    // حذف أي Triggers قديمة للنسخ الاحتياطي
+    var triggers = ScriptApp.getProjectTriggers();
+    for (var i = 0; i < triggers.length; i++) {
+      if (triggers[i].getHandlerFunction() === 'createBackup') {
+        ScriptApp.deleteTrigger(triggers[i]);
+        Logger.log('🗑️ تم حذف Trigger قديم للنسخ الاحتياطي');
+      }
+    }
+
+    // إنشاء Trigger جديد للتشغيل يومياً الساعة 12 بالليل (منتصف الليل)
+    ScriptApp.newTrigger('createBackup')
+      .timeBased()
+      .atHour(0)  // الساعة 12 بالليل (0 = منتصف الليل)
+      .everyDays(1)  // كل يوم
+      .inTimezone('Africa/Cairo')  // توقيت مصر
+      .create();
+
+    Logger.log('✅ تم إعداد النسخ الاحتياطي اليومي الساعة 12 بالليل');
+    return '✅ تم إعداد النسخ الاحتياطي اليومي بنجاح\n⏰ الساعة 12:00 بالليل (توقيت القاهرة)';
+
+  } catch (error) {
+    Logger.log('❌ خطأ في إعداد النسخ الاحتياطي: ' + error.toString());
+    throw new Error('خطأ في إعداد النسخ الاحتياطي: ' + error.toString());
+  }
+}
+
+/**
+ * إلغاء النسخ الاحتياطي التلقائي
+ * @param {string} password - كلمة السر للتحقق
+ */
+function cancelDailyBackupTrigger(password) {
+  // التحقق من كلمة السر
+  if (!password || !verifyAdminPassword(password)) {
+    throw new Error('⛔ كلمة السر غير صحيحة!');
+  }
+
+  try {
+    var triggers = ScriptApp.getProjectTriggers();
+    var deleted = 0;
+
+    for (var i = 0; i < triggers.length; i++) {
+      if (triggers[i].getHandlerFunction() === 'createBackup') {
+        ScriptApp.deleteTrigger(triggers[i]);
+        deleted++;
+      }
+    }
+
+    if (deleted > 0) {
+      Logger.log('✅ تم إلغاء ' + deleted + ' Trigger للنسخ الاحتياطي');
+      return '✅ تم إلغاء النسخ الاحتياطي التلقائي';
+    } else {
+      return 'ℹ️ لا يوجد نسخ احتياطي تلقائي مُفعّل';
+    }
+
+  } catch (error) {
+    throw new Error('خطأ في إلغاء النسخ الاحتياطي: ' + error.toString());
+  }
+}
+
+/**
+ * عرض حالة النسخ الاحتياطي
+ * @returns {string} معلومات عن حالة النسخ الاحتياطي
+ */
+function getBackupStatus() {
+  try {
+    var info = '📊 *حالة النسخ الاحتياطي*\n';
+    info += '═══════════════════\n\n';
+
+    // فحص الـ Triggers
+    var triggers = ScriptApp.getProjectTriggers();
+    var backupTriggerActive = false;
+
+    for (var i = 0; i < triggers.length; i++) {
+      if (triggers[i].getHandlerFunction() === 'createBackup') {
+        backupTriggerActive = true;
+        break;
+      }
+    }
+
+    info += '⏰ النسخ التلقائي: ' + (backupTriggerActive ? '✅ مُفعّل' : '❌ غير مُفعّل') + '\n';
+
+    // فحص المجلد
+    var backupFolderId = CONFIG.BACKUP_FOLDER_ID;
+    if (backupFolderId) {
+      try {
+        var folder = DriveApp.getFolderById(backupFolderId);
+        var files = folder.getFiles();
+        var backupCount = 0;
+        var lastBackup = null;
+
+        while (files.hasNext()) {
+          var file = files.next();
+          if (file.getName().indexOf('نسخة احتياطية') !== -1) {
+            backupCount++;
+            if (!lastBackup || file.getDateCreated() > lastBackup) {
+              lastBackup = file.getDateCreated();
+            }
+          }
+        }
+
+        info += '📁 عدد النسخ: ' + backupCount + '\n';
+
+        if (lastBackup) {
+          var lastBackupStr = Utilities.formatDate(lastBackup, 'Africa/Cairo', 'yyyy-MM-dd HH:mm');
+          info += '🕐 آخر نسخة: ' + lastBackupStr + '\n';
+        }
+
+      } catch (e) {
+        info += '⚠️ لا يمكن الوصول للمجلد\n';
+      }
+    } else {
+      info += '⚠️ لم يتم تحديد مجلد النسخ\n';
+    }
+
+    return info;
+
+  } catch (error) {
+    return 'خطأ في جلب حالة النسخ الاحتياطي: ' + error.toString();
+  }
+}
+
+/**
+ * إنشاء نسخة احتياطية يدوية (للتجربة)
+ */
+function testBackup() {
+  var result = createBackup();
+  Logger.log(result);
+  return result;
 }
