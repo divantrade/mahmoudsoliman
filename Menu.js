@@ -47,6 +47,14 @@ function onOpen() {
       .addSeparator()
       .addItem('إنشاء جميع الشيتات', 'menuInitializeSheets'))
 
+    // قسم النسخ الاحتياطي
+    .addSubMenu(ui.createMenu('💾 النسخ الاحتياطي')
+      .addItem('إنشاء نسخة احتياطية الآن', 'menuCreateBackupNow')
+      .addItem('حالة النسخ الاحتياطي', 'menuShowBackupStatus')
+      .addSeparator()
+      .addItem('تفعيل النسخ اليومي التلقائي', 'menuSetupDailyBackup')
+      .addItem('إلغاء النسخ اليومي التلقائي', 'menuCancelDailyBackup'))
+
     // قسم المساعدة
     .addSeparator()
     .addItem('ℹ️ حول النظام', 'menuShowAbout')
@@ -332,10 +340,25 @@ function menuCleanData() {
 }
 
 /**
- * إنشاء جميع الشيتات
+ * إنشاء جميع الشيتات (محمي بكلمة سر)
  */
 function menuInitializeSheets() {
   var ui = SpreadsheetApp.getUi();
+
+  // طلب كلمة السر أولاً
+  var passwordResponse = ui.prompt(
+    '🔐 كلمة السر',
+    'أدخل كلمة السر للمتابعة:',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (passwordResponse.getSelectedButton() !== ui.Button.OK) return;
+  var password = passwordResponse.getResponseText();
+
+  if (!password) {
+    ui.alert('خطأ', '⛔ يجب إدخال كلمة السر', ui.ButtonSet.OK);
+    return;
+  }
 
   var response = ui.alert(
     'تأكيد',
@@ -346,7 +369,7 @@ function menuInitializeSheets() {
   if (response !== ui.Button.YES) return;
 
   try {
-    initializeAllSheets();
+    initializeAllSheets(password);
     ui.alert('نجاح', '✅ تم إنشاء/تهيئة جميع الشيتات', ui.ButtonSet.OK);
   } catch (error) {
     ui.alert('خطأ', 'حدث خطأ: ' + error.message, ui.ButtonSet.OK);
@@ -780,6 +803,104 @@ function menuShowAssociationsReport() {
     message += '💰 إجمالي المتوقع قبضه: ' + formatNumber(report.totalExpected);
 
     ui.alert('تقرير الجمعيات', message, ui.ButtonSet.OK);
+  } catch (error) {
+    ui.alert('خطأ', 'حدث خطأ: ' + error.message, ui.ButtonSet.OK);
+  }
+}
+
+// =====================================================
+// دوال النسخ الاحتياطي
+// =====================================================
+
+/**
+ * إنشاء نسخة احتياطية الآن
+ */
+function menuCreateBackupNow() {
+  var ui = SpreadsheetApp.getUi();
+
+  var response = ui.alert(
+    'تأكيد',
+    'هل تريد إنشاء نسخة احتياطية الآن؟',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (response !== ui.Button.YES) return;
+
+  try {
+    var result = createBackup();
+    ui.alert('نتيجة', result, ui.ButtonSet.OK);
+  } catch (error) {
+    ui.alert('خطأ', 'حدث خطأ: ' + error.message, ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * عرض حالة النسخ الاحتياطي
+ */
+function menuShowBackupStatus() {
+  var ui = SpreadsheetApp.getUi();
+
+  try {
+    var status = getBackupStatus();
+    ui.alert('حالة النسخ الاحتياطي', status, ui.ButtonSet.OK);
+  } catch (error) {
+    ui.alert('خطأ', 'حدث خطأ: ' + error.message, ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * تفعيل النسخ اليومي التلقائي (محمي بكلمة سر)
+ */
+function menuSetupDailyBackup() {
+  var ui = SpreadsheetApp.getUi();
+
+  // طلب كلمة السر
+  var passwordResponse = ui.prompt(
+    '🔐 كلمة السر',
+    'أدخل كلمة السر لتفعيل النسخ الاحتياطي التلقائي:',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (passwordResponse.getSelectedButton() !== ui.Button.OK) return;
+  var password = passwordResponse.getResponseText();
+
+  if (!password) {
+    ui.alert('خطأ', '⛔ يجب إدخال كلمة السر', ui.ButtonSet.OK);
+    return;
+  }
+
+  try {
+    var result = setupDailyBackupTrigger(password);
+    ui.alert('نجاح', result, ui.ButtonSet.OK);
+  } catch (error) {
+    ui.alert('خطأ', 'حدث خطأ: ' + error.message, ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * إلغاء النسخ اليومي التلقائي (محمي بكلمة سر)
+ */
+function menuCancelDailyBackup() {
+  var ui = SpreadsheetApp.getUi();
+
+  // طلب كلمة السر
+  var passwordResponse = ui.prompt(
+    '🔐 كلمة السر',
+    'أدخل كلمة السر لإلغاء النسخ الاحتياطي التلقائي:',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (passwordResponse.getSelectedButton() !== ui.Button.OK) return;
+  var password = passwordResponse.getResponseText();
+
+  if (!password) {
+    ui.alert('خطأ', '⛔ يجب إدخال كلمة السر', ui.ButtonSet.OK);
+    return;
+  }
+
+  try {
+    var result = cancelDailyBackupTrigger(password);
+    ui.alert('نتيجة', result, ui.ButtonSet.OK);
   } catch (error) {
     ui.alert('خطأ', 'حدث خطأ: ' + error.message, ui.ButtonSet.OK);
   }
