@@ -1683,11 +1683,28 @@ function parseCompoundTransfer(text) {
     if (/منهم|منها|منه/.test(cleanText)) {
       distributionPart = cleanText.split(/منهم|منها|منه/)[1] || '';
     }
-    // نمط 2: "يعطي لزوجتي 400 وياخد لنفسه 4000 ويخلي الباقي عهده"
+    // نمط 2: استخراج كل شيء بعد المبلغ بالجنيه
     else {
-      // استخراج الجزء بعد "مصري" أو "جنيه" بعد يعادل
-      var afterCurrency = cleanText.split(/يعادل\s*\d+\s*(?:مصري|جنيه)?/)[1] || '';
-      distributionPart = afterCurrency;
+      // البحث عن النص بعد "يعادل XXXX جنيه/مصري" أو فقط "يعادل XXXX"
+      var patterns = [
+        /يعادل\s*\d+\s*(?:جنيه|مصري)\s*(.+)/i,
+        /يعادل\s*\d+\s+(.+)/i
+      ];
+      for (var p = 0; p < patterns.length; p++) {
+        var match = cleanText.match(patterns[p]);
+        if (match && match[1]) {
+          distributionPart = match[1];
+          break;
+        }
+      }
+    }
+
+    // إذا لم نجد جزء التوزيع، نبحث عن "عهده" ونأخذ ما بعدها
+    if (!distributionPart || distributionPart.trim().length < 3) {
+      var afterOhda = cleanText.match(/عهده\s+(.+)/i);
+      if (afterOhda && afterOhda[1]) {
+        distributionPart = afterOhda[1];
+      }
     }
 
     if (!distributionPart || distributionPart.trim().length < 3) {
@@ -1699,41 +1716,62 @@ function parseCompoundTransfer(text) {
     // قائمة الكلمات المفتاحية للعهدة
     var custodyKeywords = ['عهده', 'العهده', 'تفضل', 'يفضل', 'يتبقي', 'الباقي', 'المتبقي', 'يخلي', 'ويخلي'];
 
-    // أنماط متعددة لاستخراج التوزيع
-    // نمط 1: "4000 لمراتي" أو "4000 مصطفي"
-    // نمط 2: "يعطي لزوجتي 400" أو "وياخد لنفسه 4000"
-    // نمط 3: "ويخلي الباقي عهده"
-
     // نبحث عن كل الأنماط
     var distributions = [];
 
-    // نمط: "يعطي/تعطي لـ[شخص] [مبلغ]"
-    var givePattern = /(?:يعطي|تعطي|اعطي)\s*(?:ل)?([^\d٠-٩۰-۹]+?)\s*(\d+)/gi;
-    var giveMatch;
-    while ((giveMatch = givePattern.exec(distributionPart)) !== null) {
-      var recipient = giveMatch[1].trim().replace(/^ل/, '');
-      var amount = parseInt(giveMatch[2]);
-      if (amount > 0) {
-        distributions.push({ amount: amount, recipient: recipient, isCustody: false });
-        Logger.log('Give pattern: ' + amount + ' -> ' + recipient);
+    // ===== نمط 1: "يعطي [ل]زوجتي [مبلغ]" =====
+    var givePatterns = [
+      /(?:يعطي|تعطي|اعطي|هيدي|يدي)\s*ل?([^\d٠-٩۰-۹\s]+)\s*(\d+)/gi,
+      /(?:يعطي|تعطي|اعطي|هيدي|يدي)\s+(\S+)\s+(\d+)/gi
+    ];
+    for (var gp = 0; gp < givePatterns.length; gp++) {
+      var giveMatch;
+      while ((giveMatch = givePatterns[gp].exec(distributionPart)) !== null) {
+        var recipient = giveMatch[1].trim().replace(/^ل/, '');
+        var amount = parseInt(giveMatch[2]);
+        // تجنب التكرار
+        var exists = distributions.some(function(d) { return d.amount === amount; });
+        if (amount > 0 && !exists) {
+          distributions.push({ amount: amount, recipient: recipient, isCustody: false });
+          Logger.log('Give pattern: ' + amount + ' -> ' + recipient);
+        }
       }
     }
 
-    // نمط: "وياخد/ياخد لنفسه/له [مبلغ]"
-    var takePattern = /(?:وياخد|ياخد|وياخذ|ياخذ)\s*(?:ل)?(?:نفسه|نفسها|ه|ها)?\s*(\d+)/gi;
-    var takeMatch;
-    while ((takeMatch = takePattern.exec(distributionPart)) !== null) {
-      var takeAmount = parseInt(takeMatch[1]);
-      if (takeAmount > 0) {
-        distributions.push({ amount: takeAmount, recipient: result.custodian, isCustody: false, forSelf: true });
-        Logger.log('Take pattern: ' + takeAmount + ' -> ' + result.custodian + ' (for self)');
+    // ===== نمط 2: "وياخد/ياخذ [لنفسه] [مبلغ]" =====
+    var takePatterns = [
+      /(?:وياخد|ياخد|وياخذ|ياخذ)\s*(?:ل)?(?:نفسه|نفسها|ه)?\s*(\d+)/gi,
+      /(?:وياخد|ياخد|وياخذ|ياخذ)\s+(\d+)/gi
+    ];
+    for (var tp = 0; tp < takePatterns.length; tp++) {
+      var takeMatch;
+      while ((takeMatch = takePatterns[tp].exec(distributionPart)) !== null) {
+        var takeAmount = parseInt(takeMatch[1]);
+        var exists = distributions.some(function(d) { return d.amount === takeAmount; });
+        if (takeAmount > 0 && !exists) {
+          distributions.push({ amount: takeAmount, recipient: result.custodian, isCustody: false, forSelf: true });
+          Logger.log('Take pattern: ' + takeAmount + ' -> ' + result.custodian + ' (for self)');
+        }
       }
     }
 
-    // نمط: "ويخلي/يخلي الباقي عهده" أو "[مبلغ] عهده"
-    var custodyPattern = /(?:ويخلي|يخلي)\s*(?:ال)?باقي\s*(?:ال)?عهد/gi;
-    if (custodyPattern.test(distributionPart)) {
-      // حساب الباقي
+    // ===== نمط 3: "[مبلغ] الباقي عهده" أو "وعهده الباقي" أو "ويخلي الباقي عهده" =====
+    var hasCustodyRemainder = /(?:الباقي|المتبقي)\s*عهد|عهده?\s*(?:ال)?باقي|(?:ويخلي|يخلي|يفضل|تفضل)\s*(?:ال)?باقي/i.test(distributionPart);
+
+    // نمط: "[مبلغ] الباقي" أو "و [مبلغ] الباقي عهده"
+    var remainderAmountMatch = distributionPart.match(/(\d+)\s*(?:ال)?(?:باقي|المتبقي)/i);
+    if (remainderAmountMatch) {
+      var remainderAmount = parseInt(remainderAmountMatch[1]);
+      var exists = distributions.some(function(d) { return d.amount === remainderAmount; });
+      if (remainderAmount > 0 && !exists) {
+        distributions.push({ amount: remainderAmount, recipient: 'عهده', isCustody: true });
+        Logger.log('Remainder with amount: ' + remainderAmount);
+        hasCustodyRemainder = false; // لا نحتاج لحساب الباقي تلقائياً
+      }
+    }
+
+    // إذا كان "الباقي عهده" بدون مبلغ محدد، نحسب الباقي
+    if (hasCustodyRemainder) {
       var totalDistributed = 0;
       for (var d = 0; d < distributions.length; d++) {
         totalDistributed += distributions[d].amount;
@@ -1741,7 +1779,7 @@ function parseCompoundTransfer(text) {
       var remaining = result.totalAmountEGP - totalDistributed;
       if (remaining > 0) {
         distributions.push({ amount: remaining, recipient: 'عهده', isCustody: true });
-        Logger.log('Custody (remaining): ' + remaining);
+        Logger.log('Custody (auto-calculated remaining): ' + remaining);
       }
     }
 
