@@ -748,14 +748,21 @@ function processCustodyDirectly(chatId, text, user) {
     }
     Logger.log('Normalized text: ' + normalizedText);
 
-    // تحديد أمين العهدة (سارة أو مصطفى)
+    // تحديد أمين العهدة (سارة أو مصطفى أو ام سيليا)
     var custodian = 'سارة'; // افتراضي
     if (/مصطف[يى]|مصطفا/i.test(text)) {
       custodian = 'مصطفى';
+    } else if (/ام\s*سيل|أم\s*سيل|مرات[يه]|زوجت[يه]/i.test(text)) {
+      custodian = 'ام سيليا';
     } else if (/سار[ةه]|ساره/i.test(text)) {
       custodian = 'سارة';
     }
     Logger.log('Custodian: ' + custodian);
+
+    // ⭐ تحديد نوع العملية: إيداع أو صرف
+    var isDisburse = /صرف|دفع[ت]?\s*(?:من|جمعي)|أعط[يت]|اعط[يت]|من\s*العهد[هة]/i.test(text);
+    var transactionType = isDisburse ? 'صرف_من_عهدة' : 'إيداع_عهدة';
+    Logger.log('Transaction type: ' + transactionType + ' (isDisburse: ' + isDisburse + ')');
 
     // استخراج المبالغ والعملات
     var amount = 0;
@@ -828,14 +835,18 @@ function processCustodyDirectly(chatId, text, user) {
     Logger.log('Final extraction - Amount: ' + amount + ', Currency: ' + currency + ', AmountReceived: ' + amountReceived + ', Rate: ' + exchangeRate);
 
     // إنشاء بيانات المعاملة - تُحفظ في شيت الحركات الرئيسي
+    var description = transactionType === 'صرف_من_عهدة'
+      ? 'صرف من عهدة ' + custodian
+      : 'إيداع عهدة لـ ' + custodian;
+
     var transData = {
-      type: 'إيداع_عهدة',
+      type: transactionType,
       amount: amount,
       currency: currency,
       category: 'عهدة ' + custodian,
       contact: custodian,
       contact_name: custodian,
-      description: 'إيداع عهدة لـ ' + custodian,
+      description: description,
       amount_received: amountReceived,
       currency_received: amountReceived ? currencyReceived : '',
       exchange_rate: exchangeRate,
