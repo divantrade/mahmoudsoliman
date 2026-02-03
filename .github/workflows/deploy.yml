@@ -9,17 +9,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          
+
       - name: Install clasp
         run: npm install -g @google/clasp
-        
+
+      - name: Check files to deploy
+        run: |
+          echo "📁 Files that will be deployed:"
+          ls -la *.js *.json 2>/dev/null || echo "No JS/JSON files found"
+          echo ""
+          echo "📄 .clasp.json content:"
+          cat .clasp.json
+
       - name: Create clasprc.json
-        run: echo '${{ secrets.CLASPRC_JSON }}' > ~/.clasprc.json
-        
+        run: |
+          echo '${{ secrets.CLASPRC_JSON }}' > ~/.clasprc.json
+          if [ -s ~/.clasprc.json ]; then
+            echo "✅ clasprc.json created successfully"
+          else
+            echo "❌ ERROR: CLASPRC_JSON secret is empty or not configured!"
+            exit 1
+          fi
+
       - name: Push to Apps Script
-        run: clasp push -f
+        run: |
+          echo "🚀 Starting clasp push..."
+          clasp push -f
+          echo "✅ Deployment completed successfully!"
