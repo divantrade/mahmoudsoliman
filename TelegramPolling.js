@@ -764,6 +764,25 @@ function processCustodyDirectly(chatId, text, user) {
     var transactionType = isDisburse ? 'صرف_من_عهدة' : 'إيداع_عهدة';
     Logger.log('Transaction type: ' + transactionType + ' (isDisburse: ' + isDisburse + ')');
 
+    // ⭐ استخراج المستفيد من الصرف (لمن صُرف المبلغ)
+    var recipient = '';
+    // البحث عن "لـ" متبوعة باسم شخص
+    var recipientMatch = text.match(/(?:صرف|دفع|اعط[يت]|أعط[يت])\s*(?:ل|الي|إلي|الى|إلى)\s*(مرات[يه]|زوجت[يه]|ام\s*سيل[اي]|أم\s*سيل[اي]|سار[ةه]|مصطف[يى]|نفس[هو])/i);
+    if (recipientMatch) {
+      var recipientRaw = recipientMatch[1].trim();
+      // تحويل الاسم المستخرج لاسم موحد
+      if (/مرات[يه]|زوجت[يه]|ام\s*سيل|أم\s*سيل/i.test(recipientRaw)) {
+        recipient = 'ام سيليا';
+      } else if (/سار[ةه]/i.test(recipientRaw)) {
+        recipient = 'سارة';
+      } else if (/مصطف[يى]/i.test(recipientRaw)) {
+        recipient = 'مصطفى';
+      } else if (/نفس[هو]/i.test(recipientRaw)) {
+        recipient = 'نفسه'; // صرف لنفسه
+      }
+    }
+    Logger.log('Recipient: ' + (recipient || 'none'));
+
     // استخراج المبالغ والعملات
     var amount = 0;
     var currency = 'جنيه';
@@ -835,9 +854,17 @@ function processCustodyDirectly(chatId, text, user) {
     Logger.log('Final extraction - Amount: ' + amount + ', Currency: ' + currency + ', AmountReceived: ' + amountReceived + ', Rate: ' + exchangeRate);
 
     // إنشاء بيانات المعاملة - تُحفظ في شيت الحركات الرئيسي
-    var description = transactionType === 'صرف_من_عهدة'
-      ? 'صرف من عهدة ' + custodian
-      : 'إيداع عهدة لـ ' + custodian;
+    // ⭐ الوصف يشمل صاحب العهدة + المستفيد (إن وجد)
+    var description;
+    if (transactionType === 'صرف_من_عهدة') {
+      description = 'صرف من عهدة ' + custodian;
+      // إضافة المستفيد للوصف إذا كان مختلفاً عن صاحب العهدة
+      if (recipient && recipient !== 'نفسه' && recipient !== custodian) {
+        description += ' لـ ' + recipient;
+      }
+    } else {
+      description = 'إيداع عهدة لـ ' + custodian;
+    }
 
     var transData = {
       type: transactionType,
