@@ -919,6 +919,174 @@ function processCustodyDirectly(chatId, text, user) {
 }
 
 /**
+ * ⭐⭐⭐ معالجة ذكية للعهدة ⭐⭐⭐
+ * يفهم أنماط مثل:
+ * - "من مصطفي الي ساره 4000" = تحويل بين العهدات
+ * - "من مصطفي الي نفسه 3000" = صرف من العهدة
+ * - "من سارة قسط جمعية 1000" = دفع جمعية من العهدة
+ * - "من سارة شراء ذهب 5000" = شراء ذهب من العهدة
+ */
+function processSmartCustodyTransfer(chatId, text, user) {
+  Logger.log('=== processSmartCustodyTransfer START ===');
+  Logger.log('Text: ' + text);
+
+  try {
+    // تحويل الأرقام العربية
+    var arabicNums = {
+      '٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9',
+      '۰':'0','۱':'1','۲':'2','۳':'3','۴':'4','۵':'5','۶':'6','۷':'7','۸':'8','۹':'9'
+    };
+    var normalizedText = text;
+    for (var ar in arabicNums) {
+      normalizedText = normalizedText.replace(new RegExp(ar, 'g'), arabicNums[ar]);
+    }
+
+    // ⭐ استخراج المصدر (من أي عهدة)
+    var sourceMatch = normalizedText.match(/من\s*(مصطف[يى]|سار[ةه]|مرات[يه]|زوجت[يه]|ام\s*سيل[اي]|أم\s*سيل[اي])(?:\s+(?:اخت[يه]|اخو[يه]ا?|ابي))?/i);
+    if (!sourceMatch) {
+      sendMessage(chatId, '❌ لم أفهم مصدر التحويل.\n\nجرب: "من مصطفي الي ساره 4000 جنيه"');
+      return;
+    }
+
+    var sourceRaw = sourceMatch[1];
+    var sourceCustodian = 'سارة'; // افتراضي
+    if (/مصطف[يى]/i.test(sourceRaw)) {
+      sourceCustodian = 'مصطفى';
+    } else if (/مرات[يه]|زوجت[يه]|ام\s*سيل|أم\s*سيل/i.test(sourceRaw)) {
+      sourceCustodian = 'ام سيليا';
+    } else if (/سار[ةه]/i.test(sourceRaw)) {
+      sourceCustodian = 'سارة';
+    }
+    Logger.log('Source custodian: ' + sourceCustodian);
+
+    // ⭐ استخراج الوجهة (إلى أين)
+    var destMatch = normalizedText.match(/(?:الي|إلي|الى|إلى|ل)\s*(مصطف[يى]|سار[ةه]|مرات[يه]|زوجت[يه]|ام\s*سيل[اي]|أم\s*سيل[اي]|نفس[هوا])(?:\s+(?:اخت[يه]|اخو[يه]ا?|ابي))?/i);
+
+    var destCustodian = null;
+    var isToSelf = false;
+    var isToAssociation = /جمعي[ةه]|قسط/i.test(normalizedText);
+    var isToGold = /ذهب|دهب/i.test(normalizedText);
+
+    if (destMatch) {
+      var destRaw = destMatch[1];
+      if (/نفس[هوا]/i.test(destRaw)) {
+        isToSelf = true;
+      } else if (/مصطف[يى]/i.test(destRaw)) {
+        destCustodian = 'مصطفى';
+      } else if (/مرات[يه]|زوجت[يه]|ام\s*سيل|أم\s*سيل/i.test(destRaw)) {
+        destCustodian = 'ام سيليا';
+      } else if (/سار[ةه]/i.test(destRaw)) {
+        destCustodian = 'سارة';
+      }
+    }
+    Logger.log('Destination: ' + (destCustodian || (isToSelf ? 'self' : (isToAssociation ? 'association' : (isToGold ? 'gold' : 'unknown')))));
+
+    // ⭐ استخراج المبلغ
+    var amountMatch = normalizedText.match(/(\d+(?:\.\d+)?)\s*(?:جني[هة]|ريال|الف|ألف)?/i);
+    if (!amountMatch) {
+      sendMessage(chatId, '❌ لم أجد مبلغ في الرسالة.');
+      return;
+    }
+    var amount = parseFloat(amountMatch[1]);
+    var currency = /ريال/i.test(normalizedText) ? 'ريال' : 'جنيه';
+
+    Logger.log('Amount: ' + amount + ' ' + currency);
+
+    // ⭐ تحديد نوع المعاملة وبناء البيانات
+    var transactions = [];
+
+    if (destCustodian && destCustodian !== sourceCustodian) {
+      // ⭐ تحويل من عهدة لعهدة (معاملتان)
+      // 1. صرف من عهدة المصدر
+      transactions.push({
+        type: 'صرف_من_عهدة',
+        amount: amount,
+        currency: currency,
+        category: 'تحويل عهدة',
+        contact: sourceCustodian,
+        contact_name: sourceCustodian,
+        description: 'تحويل من عهدة ' + sourceCustodian + ' إلى عهدة ' + destCustodian,
+        user_name: user.name,
+        telegram_id: user.telegram_id
+      });
+      // 2. إيداع في عهدة الوجهة
+      transactions.push({
+        type: 'إيداع_عهدة',
+        amount: amount,
+        currency: currency,
+        category: 'عهدة ' + destCustodian,
+        contact: destCustodian,
+        contact_name: destCustodian,
+        description: 'إيداع من عهدة ' + sourceCustodian,
+        user_name: user.name,
+        telegram_id: user.telegram_id
+      });
+    } else if (isToSelf) {
+      // ⭐ صرف من العهدة لنفسه (مصروف)
+      transactions.push({
+        type: 'صرف_من_عهدة',
+        amount: amount,
+        currency: currency,
+        category: 'مصروف شخصي',
+        contact: sourceCustodian,
+        contact_name: sourceCustodian,
+        description: 'صرف من عهدة ' + sourceCustodian + ' لنفسه',
+        user_name: user.name,
+        telegram_id: user.telegram_id
+      });
+    } else if (isToAssociation) {
+      // ⭐ دفع قسط جمعية من العهدة
+      transactions.push({
+        type: 'صرف_من_عهدة',
+        amount: amount,
+        currency: currency,
+        category: 'جمعية',
+        contact: sourceCustodian,
+        contact_name: sourceCustodian,
+        description: 'دفع قسط جمعية من عهدة ' + sourceCustodian,
+        user_name: user.name,
+        telegram_id: user.telegram_id
+      });
+    } else if (isToGold) {
+      // ⭐ شراء ذهب من العهدة
+      transactions.push({
+        type: 'صرف_من_عهدة',
+        amount: amount,
+        currency: currency,
+        category: 'ذهب',
+        contact: sourceCustodian,
+        contact_name: sourceCustodian,
+        description: 'شراء ذهب من عهدة ' + sourceCustodian,
+        user_name: user.name,
+        telegram_id: user.telegram_id
+      });
+    } else {
+      // ⭐ صرف عام من العهدة
+      transactions.push({
+        type: 'صرف_من_عهدة',
+        amount: amount,
+        currency: currency,
+        category: 'مصروفات',
+        contact: sourceCustodian,
+        contact_name: sourceCustodian,
+        description: 'صرف من عهدة ' + sourceCustodian,
+        user_name: user.name,
+        telegram_id: user.telegram_id
+      });
+    }
+
+    // ⭐ إرسال المعاينة
+    sendPreviewWithButtons(chatId, transactions, user);
+
+  } catch (error) {
+    Logger.log('EXCEPTION in processSmartCustodyTransfer: ' + error.toString());
+    sendMessage(chatId, '❌ خطأ في معالجة العملية:\n' + error.message);
+  }
+
+  Logger.log('=== processSmartCustodyTransfer END ===');
+}
+
+/**
  * ⭐ معالجة رسائل الجمعيات مباشرة
  * مثال: "دخلت في جمعية من اول شهر 2 وتستمر لمدة 10 اشهر هقبض القسط الرابع بمبلغ 1000"
  */
@@ -1168,6 +1336,20 @@ function processUserMessage(chatId, text, user) {
       } catch (compoundError) {
         Logger.log('❌ Error in processCompoundTransferDirectly: ' + compoundError.toString());
         sendMessage(chatId, '❌ خطأ في معالجة التحويل المركب: ' + compoundError.message);
+      }
+      return;
+    }
+
+    // ⭐⭐⭐ نمط ذكي: "من [أمين عهدة] إلى [شخص/نفسه/جمعية/ذهب]" ⭐⭐⭐
+    var smartCustodyPattern = /من\s*(مصطف[يى]|سار[ةه]|مرات[يه]|زوجت[يه]|ام\s*سيل[اي]|أم\s*سيل[اي]|اخت[يه]|اخو[يه]ا?)(?:\s+اخت[يه]|\s+اخو[يه]ا?)?/i.test(cleanText);
+
+    if (smartCustodyPattern) {
+      Logger.log('*** SMART CUSTODY PATTERN DETECTED ***');
+      try {
+        processSmartCustodyTransfer(chatId, cleanText, user);
+      } catch (smartError) {
+        Logger.log('❌ Error in processSmartCustodyTransfer: ' + smartError.toString());
+        // Fallback to Gemini if smart processing fails
       }
       return;
     }
