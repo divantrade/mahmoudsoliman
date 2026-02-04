@@ -750,6 +750,30 @@ function updateUserActivity(telegramId) {
 }
 
 /**
+ * Update user name
+ * @param {string} telegramId - Telegram user ID
+ * @param {string} newName - New user name
+ */
+function updateUserName(telegramId, newName) {
+  try {
+    const sheet = getOrCreateSheet(SHEETS.USERS);
+    const data = sheet.getDataRange().getValues();
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][1] == telegramId) {
+        // العمود 3 = الاسم (index 2)
+        sheet.getRange(i + 1, 3).setValue(newName);
+        Logger.log('Updated user name for ' + telegramId + ' to: ' + newName);
+        break;
+      }
+    }
+
+  } catch (error) {
+    Logger.log('Error updating user name: ' + error.toString());
+  }
+}
+
+/**
  * Get setting value
  * @param {string} key - Setting key
  * @returns {string} Setting value
