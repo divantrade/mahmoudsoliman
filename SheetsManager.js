@@ -1718,30 +1718,41 @@ function parseAssociationMessage(text) {
 
     // ===== استخراج الشخص المسؤول =====
     // أنماط متعددة: المسؤول عنها سارة / مع سارة / عند مراتي
+    // ملاحظة: استخدام [^\s\d]+ بدلاً من [أ-ي] لأن نطاق الحروف العربية لا يعمل بشكل صحيح في JavaScript
     var responsiblePatterns = [
-      /(?:المسؤ?ول|المسئول|مسؤ?ول[هة]?ا?)\s*(?:عن[هة]?ا?)?\s+([أ-ي\s]+?)(?:\s+اخت|\s+اخو|\s+ابي|\s+امي|$)/i,  // المسؤول عنها سارة اختي
-      /(?:المسؤ?ول|المسئول|مسؤ?ول[هة]?ا?)\s*(?:عن[هة]?ا?)?\s+([أ-ي]+)/i,  // المسؤول سارة
-      /(?:عند|مع)\s+([أ-ي\s]+?)(?:\s+اخت|\s+اخو|\s+من|\s+لمدة|\s+بقيمة|$)/i,  // عند سارة / مع مراتي
+      /(?:المسؤول|المسئول|مسؤول|مسئول)[هة]?ا?\s*(?:عن[هة]?ا?)?\s+([^\s\d]+(?:\s+[^\s\d]+)?)/i,  // المسؤول عنها سارة اختي
+      /(?:عند|مع)\s+([^\s\d]+(?:\s+[^\s\d]+)?)(?:\s+من|\s+لمدة|\s+بقيمة|$)/i,  // عند سارة / مع مراتي
       /^([^\d]+?)\s+دخل[ت]?\s+جمعي/i,           // سارة مراتي دخلت جمعية
       /جمعي[هة]?\s+(?:[^\s]+\s+)?مع\s+([^\d]+?)(?:\s+من|\s+لمدة|$)/i  // جمعية مع سارة
     ];
 
+    Logger.log('Trying to extract responsible person from: ' + cleanText);
+
     for (var rp = 0; rp < responsiblePatterns.length; rp++) {
       var respMatch = cleanText.match(responsiblePatterns[rp]);
+      Logger.log('Pattern ' + rp + ' match: ' + JSON.stringify(respMatch));
       if (respMatch && respMatch[1]) {
         var person = respMatch[1].trim();
+        Logger.log('Raw person extracted: ' + person);
+
+        // إزالة الكلمات الإضافية مثل اختي/اخوي
+        person = person.replace(/\s*(اخت[يه]?|اخو[يه]?ا?|ابي|امي)\s*/gi, '').trim();
+        Logger.log('After removing relations: ' + person);
+
         // تحويل الأسماء المعروفة
         if (/مرات[يه]|زوجت[يه]/i.test(person)) {
           person = 'ام سيليا';
-        } else if (/سار[ةه]/i.test(person)) {
+        } else if (/سار[يةه]/i.test(person)) {  // إضافة ساري
           person = 'سارة';
         } else if (/مصطف[يى]/i.test(person)) {
           person = 'مصطفى';
         }
+        Logger.log('After normalization: ' + person);
+
         // تجاهل الكلمات المفتاحية
-        if (!/^(?:من|لمدة|بقيمة|شهر|جمعي)$/i.test(person) && person.length > 1) {
+        if (!/^(?:من|لمدة|بقيمة|شهر|جمعي[هة]?)$/i.test(person) && person.length > 1) {
           result.responsiblePerson = person;
-          Logger.log('Found responsible person: ' + result.responsiblePerson);
+          Logger.log('✅ Found responsible person: ' + result.responsiblePerson);
           break;
         }
       }
@@ -1750,9 +1761,9 @@ function parseAssociationMessage(text) {
     // ===== استخراج اسم الجمعية =====
     // أنماط مثل: "جمعية ام احمد" أو "اسمها جمعية ام سيليا" أو "الجمعية اسمها X"
     var namePatterns = [
-      /(?:اسمها|اسم\s*(?:ال)?جمعي[هة]?)\s+(?:جمعي[هة]?\s+)?([أ-ي\s]+?)(?:\s+من|\s+لمدة|\s+هن?قبض|\s+بقيمة|$)/i,  // اسمها جمعية ام سيليا
+      /(?:اسمها|اسم\s*(?:ال)?جمعي[هة]?)\s+(?:جمعي[هة]?\s+)?([^\d]+?)(?:\s+من|\s+لمدة|\s+هن?قبض|\s+بقيمة|$)/i,  // اسمها جمعية ام سيليا
       /جمعي[هة]?\s+([^\d\s][^\d]*?)(?:\s+مع|\s+من|\s+لمدة|\s+بقيمة|\s+هن?قبض|$)/i,  // جمعية ام احمد مع...
-      /جمعي[هة]?\s+([أ-ي\s]+?)(?:\s+من|\s+لمدة)/i   // جمعية سارة من شهر
+      /جمعي[هة]?\s+([^\d]+?)(?:\s+من|\s+لمدة)/i   // جمعية سارة من شهر
     ];
 
     var associationName = '';
