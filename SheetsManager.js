@@ -1488,7 +1488,7 @@ function addNewAssociation(assocData) {
     var totalCollection = (assocData.installment || 0) * (assocData.duration || 0);
 
     // الأعمدة: ID, الاسم, المسؤول, قيمة_القسط, عدد_الأشهر, إجمالي_القبض,
-    //          تاريخ_البدء, ترتيب_القبض, تاريخ_القبض_المتوقع, الحالة, ملاحظات
+    //          تاريخ_البدء, ترتيب_القبض, تاريخ_القبض_المتوقع, الحالة, ملاحظات, المستخدم
     var row = [
       newId,
       assocData.name || '',
@@ -1500,7 +1500,8 @@ function addNewAssociation(assocData) {
       assocData.collectionOrder || 1,
       expectedCollectionDate,
       'نشط',
-      assocData.notes || ''
+      assocData.notes || '',
+      assocData.user_name || ''  // ⭐ إضافة اسم المستخدم
     ];
 
     sheet.appendRow(row);
