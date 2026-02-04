@@ -1890,28 +1890,20 @@ function handleConfirmSave(chatId, user) {
   // هذا يضمن أن المستخدم يرى رسالة التأكيد حتى لو حدث خطأ لاحقاً
 
   if (successCount > 0) {
-    // ⭐ رسالة مختصرة وسريعة لتجنب timeout
-    var msg = '✅ *تم الحفظ!* #' + savedIds.join(', #') + '\n';
+    // ⭐ رسالة بسيطة بدون تنسيق معقد
+    var msg = 'تم الحفظ بنجاح! رقم الحركة: #' + savedIds.join(', #');
 
-    for (var j = 0; j < details.length; j++) {
-      msg += '• ' + details[j] + '\n';
-    }
+    // ⭐ إرسال مع التحقق من النجاح
+    var sent = sendMessage(chatId, msg);
+    Logger.log('Success message sent: ' + sent + ' to ' + chatId);
 
-    // ⭐ محاولة إرسال الرسالة مع معالجة الخطأ
-    try {
-      sendMessage(chatId, msg);
-      Logger.log('Success message sent to ' + chatId);
-    } catch (msgError) {
-      Logger.log('ERROR sending success message: ' + msgError.toString());
-      // محاولة ثانية برسالة أبسط
-      try {
-        sendMessage(chatId, '✅ تم الحفظ! #' + savedIds.join(', #'));
-      } catch (e) {
-        Logger.log('CRITICAL: Could not send any confirmation: ' + e.toString());
-      }
+    if (!sent) {
+      // محاولة أخيرة برسالة أبسط
+      Logger.log('Retrying with simpler message...');
+      sendMessage(chatId, 'تم الحفظ #' + savedIds[0]);
     }
   } else {
-    sendMessage(chatId, '❌ فشل حفظ المعاملة. حاول مرة أخرى.');
+    sendMessage(chatId, 'فشل حفظ المعاملة. حاول مرة أخرى.');
   }
 
   // ⭐ حذف المعاملة المعلقة بعد إرسال الرسالة
@@ -1973,6 +1965,7 @@ function sendBalanceSummary(chatId) {
 
 /**
  * إرسال رسالة
+ * @returns {boolean} true إذا نجح الإرسال
  */
 function sendMessage(chatId, text, replyMarkup) {
   try {
@@ -1999,11 +1992,27 @@ function sendMessage(chatId, text, replyMarkup) {
     var result = JSON.parse(response.getContentText());
 
     if (!result.ok) {
-      Logger.log('Send failed: ' + response.getContentText());
+      Logger.log('Send failed (Markdown): ' + response.getContentText());
+
+      // ⭐ محاولة ثانية بدون Markdown
+      payload.parse_mode = undefined;
+      delete payload.parse_mode;
+      options.payload = JSON.stringify(payload);
+
+      response = UrlFetchApp.fetch(url, options);
+      result = JSON.parse(response.getContentText());
+
+      if (!result.ok) {
+        Logger.log('Send failed (plain): ' + response.getContentText());
+        return false;
+      }
     }
+
+    return true;
 
   } catch (error) {
     Logger.log('sendMessage error: ' + error.toString());
+    return false;
   }
 }
 
