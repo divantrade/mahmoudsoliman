@@ -16,7 +16,7 @@ function savePendingTransaction(chatId, transactionData) {
     var cache = CacheService.getScriptCache();
     var key = PENDING_TRANS_PREFIX + chatId;
     var jsonData = JSON.stringify(transactionData);
-    cache.put(key, jsonData, 600); // ⭐ 10 دقائق بدلاً من 5
+    cache.put(key, jsonData, 300); // 5 دقائق
     Logger.log('Saved pending transaction for chat ' + chatId + ', size: ' + jsonData.length);
 
     // ⭐ التحقق من الحفظ فعلياً
@@ -345,9 +345,6 @@ function sendPreviewWithButtons(chatId, transactions, user) {
       ]
     ]
   };
-
-  // ⭐ إضافة ملاحظة عن وقت الصلاحية
-  previewMsg += '\n\n⏰ _صالحة لمدة 10 دقائق_';
 
   sendMessage(chatId, previewMsg, keyboard);
 }
@@ -1707,29 +1704,36 @@ function handleConfirmSave(chatId, user) {
     }
   }
 
-  // حذف المعاملة المعلقة
-  removePendingTransaction(chatId);
+  // ⭐ إرسال رسالة النجاح أولاً، ثم حذف المعاملة المعلقة
+  // هذا يضمن أن المستخدم يرى رسالة التأكيد حتى لو حدث خطأ لاحقاً
 
   if (successCount > 0) {
-    var msg = '✅ *تم الحفظ بنجاح!*\n';
-    msg += '━━━━━━━━━━━━━━━━━━━━━\n\n';
-
-    // عرض أرقام الحركات
-    msg += '🔢 *رقم الحركة:* ';
-    if (savedIds.length === 1) {
-      msg += '#' + savedIds[0] + '\n\n';
-    } else {
-      msg += savedIds.map(function(id) { return '#' + id; }).join('، ') + '\n\n';
-    }
+    // ⭐ رسالة مختصرة وسريعة لتجنب timeout
+    var msg = '✅ *تم الحفظ!* #' + savedIds.join(', #') + '\n';
 
     for (var j = 0; j < details.length; j++) {
       msg += '• ' + details[j] + '\n';
     }
 
-    sendMessage(chatId, msg);
+    // ⭐ محاولة إرسال الرسالة مع معالجة الخطأ
+    try {
+      sendMessage(chatId, msg);
+      Logger.log('Success message sent to ' + chatId);
+    } catch (msgError) {
+      Logger.log('ERROR sending success message: ' + msgError.toString());
+      // محاولة ثانية برسالة أبسط
+      try {
+        sendMessage(chatId, '✅ تم الحفظ! #' + savedIds.join(', #'));
+      } catch (e) {
+        Logger.log('CRITICAL: Could not send any confirmation: ' + e.toString());
+      }
+    }
   } else {
     sendMessage(chatId, '❌ فشل حفظ المعاملة. حاول مرة أخرى.');
   }
+
+  // ⭐ حذف المعاملة المعلقة بعد إرسال الرسالة
+  removePendingTransaction(chatId);
 }
 
 /**
