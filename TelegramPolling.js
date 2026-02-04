@@ -513,6 +513,13 @@ function handleMessage(message) {
     return;
   }
 
+  // ⭐ تحديث اسم المستخدم إذا كان فارغاً في الشيت
+  if (!user.name && userName) {
+    Logger.log('📝 Updating empty user name with: ' + userName);
+    updateUserName(userId, userName);
+    user.name = userName;
+  }
+
   if (!user.active) {
     sendMessage(chatId, '⚠️ حسابك معطل.');
     return;
@@ -1617,11 +1624,19 @@ function sendReportMenu(chatId) {
 function handleCallbackQuery(callbackQuery) {
   var chatId = callbackQuery.message.chat.id;
   var userId = callbackQuery.from.id;
+  var userName = callbackQuery.from.first_name || 'مستخدم';
   var data = callbackQuery.data;
 
   Logger.log('🔘 Button: ' + data);
 
   var user = getUserByTelegramId(userId);
+
+  // ⭐ تحديث اسم المستخدم إذا كان فارغاً في الشيت
+  if (user && !user.name && userName) {
+    Logger.log('📝 Updating empty user name in callback with: ' + userName);
+    updateUserName(userId, userName);
+    user.name = userName;
+  }
 
   // ⭐ معالجة أزرار الجمعيات
   if (data.indexOf('confirm_assoc_') === 0) {
@@ -1860,8 +1875,9 @@ function handleConfirmSave(chatId, user) {
 
   for (var i = 0; i < transactions.length; i++) {
     var transData = transactions[i];
-    transData.user_name = user.name;
-    transData.telegram_id = user.telegram_id;
+    // ⭐ استخدام user_name من الكاش إذا كان user.name فارغاً
+    transData.user_name = user.name || transData.user_name || (pending.user && pending.user.name) || '';
+    transData.telegram_id = user.telegram_id || transData.telegram_id || (pending.user && pending.user.telegram_id) || '';
 
     var result = addTransaction(transData);
     Logger.log('Save result: ' + JSON.stringify(result));
