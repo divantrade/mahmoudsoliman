@@ -16,8 +16,16 @@ function savePendingTransaction(chatId, transactionData) {
     var cache = CacheService.getScriptCache();
     var key = PENDING_TRANS_PREFIX + chatId;
     var jsonData = JSON.stringify(transactionData);
-    cache.put(key, jsonData, 300); // 5 دقائق
+    cache.put(key, jsonData, 600); // ⭐ 10 دقائق بدلاً من 5
     Logger.log('Saved pending transaction for chat ' + chatId + ', size: ' + jsonData.length);
+
+    // ⭐ التحقق من الحفظ فعلياً
+    var verify = cache.get(key);
+    if (!verify) {
+      Logger.log('WARNING: Cache verification failed for ' + chatId);
+      return false;
+    }
+
     return true;
   } catch (e) {
     Logger.log('ERROR in savePendingTransaction: ' + e.toString());
@@ -337,6 +345,9 @@ function sendPreviewWithButtons(chatId, transactions, user) {
       ]
     ]
   };
+
+  // ⭐ إضافة ملاحظة عن وقت الصلاحية
+  previewMsg += '\n\n⏰ _صالحة لمدة 10 دقائق_';
 
   sendMessage(chatId, previewMsg, keyboard);
 }
