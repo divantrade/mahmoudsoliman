@@ -1165,12 +1165,26 @@ function processUserMessage(chatId, text, user) {
     }
 
     // البحث عن كلمة العهدة بأشكالها المختلفة
+    // ⭐ أيضاً: تحويل لأمين عهدة (سارة/مصطفى/مراتي) + ريال يعادل جنيه = عهدة تلقائياً
     var hasOhdaKeyword = (
       normalizedForSearch.indexOf('عهده') !== -1 ||
       normalizedForSearch.indexOf('العهده') !== -1 ||
       /عهد[ةه]/i.test(cleanText) ||
       /ايداع/i.test(cleanText) && /سار[ةه]|مصطف[يى]/i.test(cleanText)
     );
+
+    // ⭐ نمط جديد: "حولت لـ [أمين عهدة] X ريال ما يعادل Y" بدون كلمة عهدة
+    // هذا يعني تحويل عهدة تلقائياً
+    var isCustodyTransfer = (
+      /حول[ت]?\s*(?:ل|الي|إلي)\s*(?:سار[ةه]|مصطف[يى]|مرات[يه]|زوجت[يه]|ام\s*سيل|أم\s*سيل)/i.test(cleanText) &&
+      /ريال|سعودي/i.test(cleanText) &&
+      /يعادل|يساو[يى]/i.test(cleanText)
+    );
+
+    if (isCustodyTransfer && !hasOhdaKeyword) {
+      Logger.log('*** CUSTODY TRANSFER PATTERN DETECTED (no explicit عهدة keyword) ***');
+      hasOhdaKeyword = true;
+    }
 
     Logger.log('Checking for custody keyword');
     Logger.log('Has custody keyword: ' + hasOhdaKeyword);
