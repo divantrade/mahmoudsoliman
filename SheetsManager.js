@@ -1734,9 +1734,10 @@ function parseAssociationMessage(text) {
     }
 
     // ===== استخراج اسم الجمعية =====
-    // أنماط مثل: "جمعية ام احمد" أو "جمعية سارة"
+    // أنماط مثل: "جمعية ام احمد" أو "اسمها جمعية ام سيليا" أو "الجمعية اسمها X"
     var namePatterns = [
-      /جمعي[هة]?\s+([^\d\s][^\d]*?)(?:\s+مع|\s+من|\s+لمدة|\s+بقيمة|$)/i,  // جمعية ام احمد مع...
+      /(?:اسمها|اسم\s*(?:ال)?جمعي[هة]?)\s+(?:جمعي[هة]?\s+)?([أ-ي\s]+?)(?:\s+من|\s+لمدة|\s+هن?قبض|\s+بقيمة|$)/i,  // اسمها جمعية ام سيليا
+      /جمعي[هة]?\s+([^\d\s][^\d]*?)(?:\s+مع|\s+من|\s+لمدة|\s+بقيمة|\s+هن?قبض|$)/i,  // جمعية ام احمد مع...
       /جمعي[هة]?\s+([أ-ي\s]+?)(?:\s+من|\s+لمدة)/i   // جمعية سارة من شهر
     ];
 
@@ -1746,7 +1747,7 @@ function parseAssociationMessage(text) {
       if (nameMatch && nameMatch[1]) {
         var potentialName = nameMatch[1].trim();
         // تجاهل الكلمات المفتاحية
-        if (!/^(?:من|لمدة|مع|بقيمة|شهر)$/i.test(potentialName) && potentialName.length > 1) {
+        if (!/^(?:من|لمدة|مع|بقيمة|شهر|شهريا|بداية)$/i.test(potentialName) && potentialName.length > 1) {
           associationName = potentialName;
           Logger.log('Found association name: ' + associationName);
           break;
@@ -1755,22 +1756,50 @@ function parseAssociationMessage(text) {
     }
 
     // ===== استخراج شهر البداية =====
-    var startMonthMatch = cleanText.match(/(?:من|بداية|اول|أول)\s*(?:شهر)?\s*(\d{1,2})/i);
-    if (startMonthMatch) {
-      result.startMonth = parseInt(startMonthMatch[1]);
+    // أنماط متعددة: من شهر 2 / بداية شهر 2 / تبدأ شهر 2 / بداية الجمعية شهر 2
+    var startMonthPatterns = [
+      /(?:من|بداية|اول|أول|تبدأ|تبدا|ابتداء)\s*(?:من)?\s*(?:شهر)?\s*(\d{1,2})/i,
+      /بداية\s*(?:ال)?جمعي[هة]?\s*(?:من)?\s*(?:شهر)?\s*(\d{1,2})/i,
+      /(?:شهر|الشهر)\s*(\d{1,2})\s*(?:بداية|اول)/i,
+      /تبد[أا]\s*(?:من)?\s*(?:شهر)?\s*(\d{1,2})/i
+    ];
+
+    for (var smp = 0; smp < startMonthPatterns.length; smp++) {
+      var startMonthMatch = cleanText.match(startMonthPatterns[smp]);
+      if (startMonthMatch && startMonthMatch[1]) {
+        result.startMonth = parseInt(startMonthMatch[1]);
+        Logger.log('Found start month: ' + result.startMonth);
+        break;
+      }
     }
 
     // ===== استخراج المدة =====
-    var durationMatch = cleanText.match(/(?:لمدة|مدة|تستمر)\s*(\d{1,2})\s*(?:شهر|اشهر|أشهر)/i);
-    if (durationMatch) {
-      result.duration = parseInt(durationMatch[1]);
+    // شهورة / شهور / أشهر / شهر
+    var durationPatterns = [
+      /(?:لمدة|مدة|تستمر)\s*(\d{1,2})\s*(?:شهر|شهور|شهورة|اشهر|أشهر)/i,
+      /(\d{1,2})\s*(?:شهر|شهور|شهورة|اشهر|أشهر)\s*(?:متواصل|متتالي)?/i
+    ];
+
+    for (var dp = 0; dp < durationPatterns.length; dp++) {
+      var durationMatch = cleanText.match(durationPatterns[dp]);
+      if (durationMatch && durationMatch[1]) {
+        var dur = parseInt(durationMatch[1]);
+        // تجاهل الأرقام الصغيرة جداً (مثل شهر البداية)
+        if (dur >= 6 && dur <= 36) {
+          result.duration = dur;
+          Logger.log('Found duration: ' + result.duration);
+          break;
+        }
+      }
     }
 
     // ===== استخراج ترتيب القبض =====
-    // أنماط موسعة: هنقبض/هقبض/اقبض/نقبض ال/الـ 10 أو الرابع/الخامس...
+    // أنماط موسعة: هنقبض/هقبض/اقبض/نقبض ال/الـ/رقم 10 أو الرابع/الخامس...
     var collectionPatterns = [
-      /(?:هنقبض|هقبض|هاقبض|اقبض|أقبض|نقبض|القسط|الدور|ترتيب)\s*(?:ال|الـ)?\s*(\d{1,2})/i,
-      /(?:هنقبض|هقبض|هاقبض|اقبض|أقبض|نقبض|القسط|الدور|ترتيب)\s*(?:ال|الـ)?\s*(الاول|الأول|الثاني|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر)/i
+      /(?:هنقبض|هقبض|هاقبض|اقبض|أقبض|نقبض|القسط|الدور|ترتيب)\s*(?:ال|الـ|رقم|القسط)?\s*(\d{1,2})/i,
+      /(?:هنقبض|هقبض|هاقبض|اقبض|أقبض|نقبض|القسط|الدور|ترتيب)\s*(?:ال|الـ)?\s*(الاول|الأول|الثاني|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر|الحادي عشر|الثاني عشر)/i,
+      /قبض\s*(?:ال|الـ|رقم)?\s*(\d{1,2})/i,
+      /(?:رقم|الرقم)\s*(\d{1,2})\s*(?:في|من)?\s*(?:ال)?جمعي/i
     ];
 
     var orderMap = {
