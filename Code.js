@@ -1,13 +1,14 @@
 /**
  * =====================================================
- * نظام محمود المحاسبي
- * Mahmoud Accounting System
+ * نظام محمود المحاسبي v2.0
+ * Mahmoud Accounting System - Double Entry
  * =====================================================
  *
  * نظام محاسبي ذكي مبني على Google Sheets و Telegram Bot
  * مع دعم الذكاء الاصطناعي Gemini لفهم اللغة الطبيعية
+ * نظام القيد المزدوج - كل حركة لها من_حساب وإلى_حساب
  *
- * Version: 1.0.0
+ * Version: 2.0.0
  * Author: Adel Soliman
  * =====================================================
  */
@@ -39,7 +40,7 @@ function initialize() {
  * Web app entry point for GET requests
  */
 function doGet(e) {
-  return ContentService.createTextOutput('نظام محمود المحاسبي يعمل! 🟢');
+  return ContentService.createTextOutput('نظام محمود المحاسبي v2.0 يعمل! 🟢\nDouble Entry Accounting System');
 }
 
 /**
@@ -47,14 +48,14 @@ function doGet(e) {
  */
 function testBot() {
   const chatId = 786700586; // Adel's Telegram ID
-  sendMessage(chatId, '✅ البوت يعمل بنجاح!\n\nنظام محمود المحاسبي جاهز للاستخدام.');
+  sendMessage(chatId, '✅ البوت يعمل بنجاح!\n\nنظام محمود المحاسبي v2.0 جاهز للاستخدام.\n(نظام القيد المزدوج)');
 }
 
 /**
  * Test Gemini AI
  */
 function testGemini() {
-  const testMessage = 'صرفت 150 ريال غداء مع الزملاء';
+  const testMessage = 'حولت لسارة 5000 جنيه عهدة';
   const result = parseMessageWithGemini(testMessage, 'Test User');
   Logger.log(JSON.stringify(result, null, 2));
   return result;
@@ -84,7 +85,6 @@ function checkUpcomingAssociations() {
     for (let i = 1; i < data.length; i++) {
       if (data[i][8] === 'نشط' || data[i][8] === 'active') {
         // Check if payment is due soon
-        // This is a simplified check - you may want to enhance it
         const startDate = new Date(data[i][4]);
         const dayOfMonth = startDate.getDate();
 
@@ -106,7 +106,7 @@ function checkUpcomingAssociations() {
 }
 
 /**
- * Weekly report function
+ * Weekly report function - Updated for double entry system
  */
 function sendWeeklyReport() {
   try {
@@ -120,28 +120,51 @@ function sendWeeklyReport() {
     const weekAgo = new Date(today);
     weekAgo.setDate(weekAgo.getDate() - 7);
 
-    let totalIncome = 0;
-    let totalExpense = 0;
-    let totalTransfer = 0;
+    let totalIncome = { SAR: 0, EGP: 0 };
+    let totalExpense = { SAR: 0, EGP: 0 };
+    let totalTransfer = { SAR: 0, EGP: 0 };
 
+    // New format columns: 0:ID, 1:Date, 2:Time, 3:Nature, 4:Category, 5:Item, 6:Amount, 7:Currency
     for (let i = 1; i < data.length; i++) {
       const rowDate = new Date(data[i][1]);
       if (rowDate >= weekAgo && rowDate <= today) {
-        const type = data[i][3];
-        const amount = parseFloat(data[i][5]) || 0;
+        const nature = data[i][3];
+        const amount = parseFloat(data[i][6]) || 0;
+        const currency = data[i][7] || 'SAR';
 
-        if (type === 'دخل') totalIncome += amount;
-        else if (type === 'مصروف') totalExpense += amount;
-        else if (type === 'تحويل') totalTransfer += amount;
+        if (nature === 'إيراد') {
+          totalIncome[currency] = (totalIncome[currency] || 0) + amount;
+        } else if (nature === 'مصروف') {
+          totalExpense[currency] = (totalExpense[currency] || 0) + amount;
+        } else if (nature === 'تحويل') {
+          totalTransfer[currency] = (totalTransfer[currency] || 0) + amount;
+        }
       }
     }
 
     let report = `📊 *التقرير الأسبوعي*\n`;
     report += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
-    report += `💰 الدخل: ${formatNumber(totalIncome)} ر.س\n`;
-    report += `💸 المصروفات: ${formatNumber(totalExpense)} ر.س\n`;
-    report += `📤 التحويلات: ${formatNumber(totalTransfer)} ر.س\n\n`;
-    report += `📈 الصافي: ${formatNumber(totalIncome - totalExpense - totalTransfer)} ر.س`;
+
+    report += `💰 *الإيرادات:*\n`;
+    if (totalIncome.SAR) report += `   ${formatNumber(totalIncome.SAR)} ر.س\n`;
+    if (totalIncome.EGP) report += `   ${formatNumber(totalIncome.EGP)} ج.م\n`;
+
+    report += `\n💸 *المصروفات:*\n`;
+    if (totalExpense.SAR) report += `   ${formatNumber(totalExpense.SAR)} ر.س\n`;
+    if (totalExpense.EGP) report += `   ${formatNumber(totalExpense.EGP)} ج.م\n`;
+
+    report += `\n📤 *التحويلات:*\n`;
+    if (totalTransfer.SAR) report += `   ${formatNumber(totalTransfer.SAR)} ر.س\n`;
+    if (totalTransfer.EGP) report += `   ${formatNumber(totalTransfer.EGP)} ج.م\n`;
+
+    // Net calculation
+    const netSAR = (totalIncome.SAR || 0) - (totalExpense.SAR || 0) - (totalTransfer.SAR || 0);
+    const netEGP = (totalIncome.EGP || 0) - (totalExpense.EGP || 0) - (totalTransfer.EGP || 0);
+
+    report += `\n━━━━━━━━━━━━━━━━━━━━━\n`;
+    report += `📈 *الصافي:*\n`;
+    report += `   ${formatNumber(netSAR)} ر.س\n`;
+    report += `   ${formatNumber(netEGP)} ج.م`;
 
     sendMessage(adminId, report);
 
@@ -160,6 +183,32 @@ function sendMonthlyReport() {
     sendMessage(adminId, report);
   } catch (error) {
     Logger.log('Error in sendMonthlyReport: ' + error.toString());
+  }
+}
+
+/**
+ * Send balances report
+ */
+function sendBalancesReport() {
+  try {
+    const adminId = 786700586;
+    const report = generateBalancesReport();
+    sendMessage(adminId, report);
+  } catch (error) {
+    Logger.log('Error in sendBalancesReport: ' + error.toString());
+  }
+}
+
+/**
+ * Send custody report
+ */
+function sendCustodyReportToAdmin() {
+  try {
+    const adminId = 786700586;
+    const report = generateCustodyReport();
+    sendMessage(adminId, report);
+  } catch (error) {
+    Logger.log('Error in sendCustodyReportToAdmin: ' + error.toString());
   }
 }
 
@@ -198,17 +247,57 @@ function createTriggers() {
 }
 
 /**
- * Quick add transaction (for testing)
+ * Quick add transaction (for testing) - Updated for double entry
  */
-function quickAdd(type, amount, description) {
-  return addTransaction({
-    type: type,
+function quickAdd(nature, amount, fromAccount, toAccount, description) {
+  return saveTransaction({
+    nature: nature,
+    category: 'عام',
+    item: description || 'حركة سريعة',
     amount: amount,
     currency: 'SAR',
-    description: description,
-    user_name: 'System',
-    telegram_id: '0'
+    fromAccount: fromAccount || 'MAIN',
+    toAccount: toAccount || '',
+    description: description || ''
+  }, {
+    name: 'System',
+    telegramId: '0'
   });
+}
+
+/**
+ * Test transaction with double entry
+ */
+function testDoubleEntry() {
+  // Test: Transfer 5000 SAR from MAIN to SARA custody (converts to EGP)
+  const result = saveTransaction({
+    nature: 'تحويل',
+    category: 'عهدة',
+    item: 'تحويل عهدة',
+    amount: 300,
+    currency: 'SAR',
+    fromAccount: 'MAIN',
+    toAccount: 'SARA',
+    convertedAmount: 9000,
+    convertedCurrency: 'EGP',
+    exchangeRate: 30,
+    description: 'تحويل عهدة لسارة'
+  }, {
+    name: 'Test User',
+    telegramId: '123456'
+  });
+
+  Logger.log('Test result: ' + JSON.stringify(result));
+  return result;
+}
+
+/**
+ * Get account balance (helper function)
+ */
+function getBalance(accountCode) {
+  const balance = calculateAccountBalance(accountCode);
+  Logger.log(`Balance for ${accountCode}: SAR=${balance.SAR}, EGP=${balance.EGP}`);
+  return balance;
 }
 
 /**
@@ -261,4 +350,28 @@ function testBotConnection() {
  */
 function checkMessages() {
   return manualCheck();
+}
+
+/**
+ * Display system info
+ */
+function showSystemInfo() {
+  const accounts = getAllAccounts();
+  const items = getAllItems();
+
+  Logger.log('=== System Info ===');
+  Logger.log('Version: 2.0.0 (Double Entry)');
+  Logger.log('Accounts: ' + accounts.length);
+  Logger.log('Items: ' + items.length);
+
+  accounts.forEach(acc => {
+    const balance = calculateAccountBalance(acc.code);
+    Logger.log(`${acc.name} (${acc.code}): SAR=${balance.SAR}, EGP=${balance.EGP}`);
+  });
+
+  return {
+    version: '2.0.0',
+    accounts: accounts.length,
+    items: items.length
+  };
 }
