@@ -682,11 +682,16 @@ function handleCommand(chatId, text, user) {
       break;
 
     case '/monthly':
-      sendMessage(chatId, generateMonthlySummary());
+      sendReportWithPdfOption(chatId, generateUnifiedReport(), 'تقرير_شهري');
+      break;
+
+    case '/statement':
+    case '/كشف':
+      sendStatementAccountMenu(chatId);
       break;
 
     case '/wife':
-      sendMessage(chatId, generateWifeReport());
+      sendReportWithPdfOption(chatId, generateAccountStatement('WIFE'), 'كشف_حساب_الزوجة');
       break;
 
     case '/siblings':
@@ -694,22 +699,26 @@ function handleCommand(chatId, text, user) {
       break;
 
     case '/gold':
-      sendMessage(chatId, generateGoldReport());
+      sendReportWithPdfOption(chatId, generateGoldReport(), 'تقرير_الذهب');
       break;
 
     case '/custody':
     case '/عهدة':
+      sendMessage(chatId, generateCustodyReport());
+      break;
+
     case '/sara':
-      sendCustodyReport(chatId, 'سارة');
+      sendReportWithPdfOption(chatId, generateAccountStatement('SARA'), 'كشف_حساب_سارة');
       break;
 
     case '/mostafa':
     case '/مصطفى':
-      sendCustodyReport(chatId, 'مصطفى');
+      sendReportWithPdfOption(chatId, generateAccountStatement('MOSTAFA'), 'كشف_حساب_مصطفى');
       break;
 
     case '/associations':
-      sendMessage(chatId, generateAssociationsReport());
+    case '/assoc':
+      sendReportWithPdfOption(chatId, generateAssociationsReport(), 'تقرير_الجمعيات');
       break;
 
     case '/savings':
@@ -1696,29 +1705,32 @@ function sendHelpMessage(chatId, user) {
     '*📚 الأوامر:*\n' +
     '/امثلة - كل النماذج التوضيحية\n' +
     '/report - قائمة التقارير\n' +
-    '/balance - الرصيد\n' +
+    '/monthly - التقرير الشامل\n' +
+    '/statement - كشف حساب تفصيلي\n' +
+    '/balance - الأرصدة\n' +
+    '/gold - تقرير الذهب\n' +
+    '/associations - تقرير الجمعيات\n' +
     '/backup - حالة النسخ الاحتياطي';
 
   sendMessage(chatId, msg);
 }
 
 /**
- * قائمة التقارير
+ * قائمة التقارير الجديدة
  */
 function sendReportMenu(chatId) {
   var keyboard = {
     inline_keyboard: [
       [
-        { text: '📊 الشهري', callback_data: 'rpt_monthly' },
-        { text: '💰 الرصيد', callback_data: 'cmd_balance' }
+        { text: '📊 التقرير الشامل', callback_data: 'rpt_monthly' }
       ],
       [
-        { text: '💕 الزوجة', callback_data: 'rpt_wife' },
-        { text: '👨‍👩‍👧‍👦 الإخوة', callback_data: 'rpt_siblings' }
+        { text: '📋 كشف حساب', callback_data: 'rpt_statement' },
+        { text: '💰 الأرصدة', callback_data: 'cmd_balance' }
       ],
       [
-        { text: '💍 الذهب', callback_data: 'rpt_gold' },
-        { text: '🔄 الجمعيات', callback_data: 'rpt_assoc' }
+        { text: '🔄 الجمعيات', callback_data: 'rpt_assoc' },
+        { text: '💍 الذهب', callback_data: 'rpt_gold' }
       ],
       [
         { text: '🏦 المدخرات', callback_data: 'rpt_savings' },
@@ -1728,6 +1740,195 @@ function sendReportMenu(chatId) {
   };
 
   sendMessage(chatId, '📊 *اختر التقرير:*', keyboard);
+}
+
+/**
+ * إرسال تقرير مع زر تصدير PDF
+ */
+function sendReportWithPdfOption(chatId, reportText, pdfTitle) {
+  try {
+    // إرسال التقرير كرسالة نصية
+    var keyboard = {
+      inline_keyboard: [
+        [
+          { text: '📄 تحميل PDF', callback_data: 'pdf_' + pdfTitle }
+        ]
+      ]
+    };
+
+    // إذا كان النص طويل جدا، تقسيمه
+    if (reportText.length > 4000) {
+      var parts = splitLongMessage(reportText);
+      for (var i = 0; i < parts.length - 1; i++) {
+        sendMessage(chatId, parts[i]);
+      }
+      // الجزء الأخير مع زر PDF
+      sendMessage(chatId, parts[parts.length - 1], keyboard);
+    } else {
+      sendMessage(chatId, reportText, keyboard);
+    }
+  } catch (error) {
+    Logger.log('sendReportWithPdfOption error: ' + error.toString());
+    sendMessage(chatId, reportText);
+  }
+}
+
+/**
+ * تقسيم رسالة طويلة
+ */
+function splitLongMessage(text) {
+  var maxLen = 4000;
+  var parts = [];
+  var lines = text.split('\n');
+  var current = '';
+
+  for (var i = 0; i < lines.length; i++) {
+    if ((current + '\n' + lines[i]).length > maxLen && current.length > 0) {
+      parts.push(current);
+      current = lines[i];
+    } else {
+      current = current ? (current + '\n' + lines[i]) : lines[i];
+    }
+  }
+  if (current.length > 0) {
+    parts.push(current);
+  }
+
+  return parts.length > 0 ? parts : [text];
+}
+
+/**
+ * قائمة اختيار الحساب لكشف الحساب
+ */
+function sendStatementAccountMenu(chatId) {
+  var keyboard = {
+    inline_keyboard: [
+      [
+        { text: '🏦 الخزنة الرئيسية', callback_data: 'stmt_MAIN' }
+      ],
+      [
+        { text: '💕 الزوجة (سارة)', callback_data: 'stmt_WIFE' },
+        { text: '👧 سارة (الأخت)', callback_data: 'stmt_SARA' }
+      ],
+      [
+        { text: '👦 مصطفى', callback_data: 'stmt_MOSTAFA' },
+        { text: '👧 هاجر', callback_data: 'stmt_HAGAR' }
+      ],
+      [
+        { text: '👦 محمد', callback_data: 'stmt_MOHAMED' }
+      ]
+    ]
+  };
+
+  sendMessage(chatId, '📋 *اختر الحساب لعرض كشف الحساب:*', keyboard);
+}
+
+/**
+ * إرسال ملف PDF عبر تليجرام
+ */
+function sendDocument(chatId, blob, caption) {
+  try {
+    var url = CONFIG.TELEGRAM_API_URL + CONFIG.TELEGRAM_BOT_TOKEN + '/sendDocument';
+
+    var boundary = '----FormBoundary' + new Date().getTime();
+
+    // بناء multipart form data
+    var payload = Utilities.newBlob('').getBytes();
+
+    // حقل chat_id
+    var chatIdPart = '--' + boundary + '\r\n' +
+      'Content-Disposition: form-data; name="chat_id"\r\n\r\n' +
+      chatId + '\r\n';
+
+    // حقل caption (اختياري)
+    var captionPart = '';
+    if (caption) {
+      captionPart = '--' + boundary + '\r\n' +
+        'Content-Disposition: form-data; name="caption"\r\n\r\n' +
+        caption + '\r\n';
+    }
+
+    // حقل الملف
+    var filePart = '--' + boundary + '\r\n' +
+      'Content-Disposition: form-data; name="document"; filename="' + blob.getName() + '"\r\n' +
+      'Content-Type: application/pdf\r\n\r\n';
+
+    var endPart = '\r\n--' + boundary + '--\r\n';
+
+    // تجميع البيانات
+    var requestBody = Utilities.newBlob(chatIdPart + captionPart + filePart).getBytes()
+      .concat(blob.getBytes())
+      .concat(Utilities.newBlob(endPart).getBytes());
+
+    var options = {
+      method: 'POST',
+      contentType: 'multipart/form-data; boundary=' + boundary,
+      payload: requestBody,
+      muteHttpExceptions: true
+    };
+
+    var response = UrlFetchApp.fetch(url, options);
+    var result = JSON.parse(response.getContentText());
+
+    if (!result.ok) {
+      Logger.log('sendDocument failed: ' + response.getContentText());
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    Logger.log('sendDocument error: ' + error.toString());
+    return false;
+  }
+}
+
+/**
+ * معالجة طلب تصدير PDF
+ */
+function handlePdfExport(chatId, pdfTitle) {
+  try {
+    // إعادة توليد التقرير المناسب بناءً على العنوان
+    var reportText = '';
+    var titleMap = {
+      'تقرير_شهري': function() { return generateUnifiedReport(); },
+      'تقرير_الذهب': function() { return generateGoldReport(); },
+      'تقرير_الجمعيات': function() { return generateAssociationsReport(); },
+      'تقرير_المدخرات': function() { return generateSavingsReport(); },
+      'تقرير_السلف': function() { return generateLoansReport(); }
+    };
+
+    // كشف حساب
+    if (pdfTitle.indexOf('كشف_حساب_') === 0) {
+      var nameToCode = {
+        'الخزنة الرئيسية': 'MAIN', 'الخزنة_الرئيسية': 'MAIN',
+        'الزوجة': 'WIFE', 'سارة': 'SARA',
+        'مصطفى': 'MOSTAFA', 'هاجر': 'HAGAR', 'محمد': 'MOHAMED'
+      };
+      var accountName = pdfTitle.replace('كشف_حساب_', '');
+      var code = nameToCode[accountName] || accountName;
+      reportText = generateAccountStatement(code);
+    } else if (titleMap[pdfTitle]) {
+      reportText = titleMap[pdfTitle]();
+    } else {
+      sendMessage(chatId, '❌ لم يتم التعرف على نوع التقرير.');
+      return;
+    }
+
+    // تصدير كـ PDF
+    var pdfResult = exportReportAsPDF(reportText, pdfTitle);
+
+    if (pdfResult.success) {
+      var sent = sendDocument(chatId, pdfResult.blob, '📄 ' + pdfTitle.replace(/_/g, ' '));
+      if (!sent) {
+        sendMessage(chatId, '❌ فشل إرسال ملف PDF. حاول مرة أخرى.');
+      }
+    } else {
+      sendMessage(chatId, '❌ فشل تصدير PDF: ' + (pdfResult.error || 'خطأ غير معروف'));
+    }
+  } catch (error) {
+    Logger.log('handlePdfExport error: ' + error.toString());
+    sendMessage(chatId, '❌ خطأ في تصدير PDF: ' + error.message);
+  }
 }
 
 /**
@@ -1773,6 +1974,39 @@ function handleCallbackQuery(callbackQuery) {
     return;
   }
 
+  // ⭐ معالجة أزرار كشف الحساب
+  if (data.indexOf('stmt_') === 0) {
+    var accountCode = data.replace('stmt_', '');
+    sendChatAction(chatId, 'typing');
+    var accountNames = {
+      'MAIN': 'الخزنة الرئيسية',
+      'WIFE': 'الزوجة',
+      'SARA': 'سارة',
+      'MOSTAFA': 'مصطفى',
+      'HAGAR': 'هاجر',
+      'MOHAMED': 'محمد'
+    };
+    var pdfTitle = 'كشف_حساب_' + (accountNames[accountCode] || accountCode);
+    try {
+      var stmtReport = generateAccountStatement(accountCode);
+      sendReportWithPdfOption(chatId, stmtReport, pdfTitle);
+    } catch (error) {
+      Logger.log('Statement error: ' + error.toString());
+      sendMessage(chatId, '❌ خطأ في إنشاء كشف الحساب: ' + error.message);
+    }
+    answerCallbackQuery(callbackQuery.id);
+    return;
+  }
+
+  // ⭐ معالجة أزرار تصدير PDF
+  if (data.indexOf('pdf_') === 0) {
+    var pdfTitle = data.replace('pdf_', '');
+    sendChatAction(chatId, 'upload_document');
+    handlePdfExport(chatId, pdfTitle);
+    answerCallbackQuery(callbackQuery.id);
+    return;
+  }
+
   switch (data) {
     // ⭐⭐⭐ أزرار تأكيد/إلغاء المعاملة ⭐⭐⭐
     case 'confirm_save':
@@ -1796,26 +2030,30 @@ function handleCallbackQuery(callbackQuery) {
     case 'cmd_balance':
       sendBalanceSummary(chatId);
       break;
+
+    // ⭐ التقارير الجديدة
     case 'rpt_monthly':
-      sendMessage(chatId, generateMonthlySummary());
+      sendChatAction(chatId, 'typing');
+      sendReportWithPdfOption(chatId, generateUnifiedReport(), 'تقرير_شهري');
       break;
-    case 'rpt_wife':
-      sendMessage(chatId, generateWifeReport());
-      break;
-    case 'rpt_siblings':
-      sendMessage(chatId, generateSiblingsReport());
+    case 'rpt_statement':
+      sendStatementAccountMenu(chatId);
       break;
     case 'rpt_gold':
-      sendMessage(chatId, generateGoldReport());
+      sendChatAction(chatId, 'typing');
+      sendReportWithPdfOption(chatId, generateGoldReport(), 'تقرير_الذهب');
       break;
     case 'rpt_assoc':
-      sendMessage(chatId, generateAssociationsReport());
+      sendChatAction(chatId, 'typing');
+      sendReportWithPdfOption(chatId, generateAssociationsReport(), 'تقرير_الجمعيات');
       break;
     case 'rpt_savings':
-      sendMessage(chatId, generateSavingsReport());
+      sendChatAction(chatId, 'typing');
+      sendReportWithPdfOption(chatId, generateSavingsReport(), 'تقرير_المدخرات');
       break;
     case 'rpt_loans':
-      sendMessage(chatId, generateLoansReport());
+      sendChatAction(chatId, 'typing');
+      sendReportWithPdfOption(chatId, generateLoansReport(), 'تقرير_السلف');
       break;
   }
 
@@ -2220,13 +2458,11 @@ function answerCallbackQuery(callbackQueryId) {
 function setupBotMenu() {
   var commands = [
     { command: 'start', description: '🏠 البداية والقائمة الرئيسية' },
-    { command: 'report', description: '📊 التقارير' },
-    { command: 'balance', description: '💰 الرصيد الحالي' },
-    { command: 'monthly', description: '📅 تقرير الشهر' },
-    { command: 'wife', description: '💕 تقرير الزوجة' },
-    { command: 'sara', description: '💼 عهدة سارة' },
-    { command: 'mostafa', description: '📦 عهدة مصطفى' },
-    { command: 'siblings', description: '👨‍👩‍👧‍👦 تقرير الإخوة' },
+    { command: 'report', description: '📊 قائمة التقارير' },
+    { command: 'monthly', description: '📊 التقرير الشامل الشهري' },
+    { command: 'statement', description: '📋 كشف حساب تفصيلي' },
+    { command: 'balance', description: '💰 الأرصدة الحالية' },
+    { command: 'associations', description: '🔄 تقرير الجمعيات' },
     { command: 'gold', description: '💍 تقرير الذهب' },
     { command: 'help', description: '❓ المساعدة' }
   ];

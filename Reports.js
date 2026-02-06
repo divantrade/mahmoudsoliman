@@ -5,1011 +5,967 @@
  * =====================================================
  */
 
-/**
- * Format number with thousands separator
- * @param {number} num - Number to format
- * @returns {string} Formatted number
- */
+// ============================================
+// دوال مساعدة
+// ============================================
+
 function formatNumber(num) {
   if (num === null || num === undefined || isNaN(num)) return '0';
   return num.toLocaleString('en-US', { maximumFractionDigits: 2 });
 }
 
-/**
- * تنسيق مبالغ مزدوجة العملة {SAR: x, EGP: y}
- */
-function formatDualCurrency(amounts) {
-  var parts = [];
-  if (amounts.SAR) parts.push(formatNumber(amounts.SAR) + ' ر.س');
-  if (amounts.EGP) parts.push(formatNumber(amounts.EGP) + ' ج.م');
-  return parts.length > 0 ? parts.join(' + ') : '0';
-}
-
-/**
- * Get currency symbol
- * @param {string} currency - Currency code
- * @returns {string} Symbol
- */
 function getCurrencySymbol(currency) {
-  const symbols = {
-    'SAR': 'ر.س',
-    'EGP': 'ج.م',
-    'USD': '$',
-    'EUR': '€'
-  };
+  var symbols = { 'SAR': 'ر.س', 'EGP': 'ج.م', 'USD': '$', 'AED': 'د.إ', 'EUR': '€' };
   return symbols[currency] || currency;
 }
 
-// ============================================
-// تقارير أرصدة الحسابات
-// ============================================
+/**
+ * تنسيق مبالغ متعددة العملات
+ * يقبل كائن {SAR: x, EGP: y, USD: z} ويعرض العملات غير الصفرية فقط
+ */
+function formatMultiCurrency(amounts) {
+  var parts = [];
+  var order = ['SAR', 'EGP', 'USD', 'AED'];
+  for (var c = 0; c < order.length; c++) {
+    var cur = order[c];
+    if (amounts[cur] && Math.abs(amounts[cur]) > 0.01) {
+      parts.push(formatNumber(amounts[cur]) + ' ' + getCurrencySymbol(cur));
+    }
+  }
+  // أي عملات أخرى غير متوقعة
+  for (var key in amounts) {
+    if (order.indexOf(key) === -1 && amounts[key] && Math.abs(amounts[key]) > 0.01) {
+      parts.push(formatNumber(amounts[key]) + ' ' + getCurrencySymbol(key));
+    }
+  }
+  return parts.length > 0 ? parts.join(' + ') : '0';
+}
+
+// للتوافق مع الكود القديم
+function formatDualCurrency(amounts) {
+  return formatMultiCurrency(amounts);
+}
 
 /**
- * Generate all accounts balances report
- * تقرير أرصدة جميع الحسابات
- * @returns {string} Formatted report
+ * إنشاء كائن أرصدة فارغ
  */
-function generateBalancesReport() {
-  try {
-    const accounts = getAllAccounts();
+function emptyBalance() {
+  return { SAR: 0, EGP: 0, USD: 0 };
+}
 
-    let report = `💰 *تقرير أرصدة الحسابات*\n`;
-    report += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+/**
+ * جمع أرصدة
+ */
+function addBalances(a, b) {
+  var result = {};
+  for (var key in a) { result[key] = (result[key] || 0) + (a[key] || 0); }
+  for (var key in b) { result[key] = (result[key] || 0) + (b[key] || 0); }
+  return result;
+}
 
-    // Group accounts by type
-    const accountsByType = {};
-    accounts.forEach(account => {
-      if (!accountsByType[account.type]) {
-        accountsByType[account.type] = [];
-      }
-      const balance = calculateAccountBalance(account.code);
-      accountsByType[account.type].push({
-        ...account,
-        balance: balance
-      });
-    });
+/**
+ * قراءة كل حركات الشهر مرة واحدة وتصنيفها
+ */
+function getMonthlyTransactionData(month, year) {
+  var sheet = getOrCreateSheet(SHEETS.TRANSACTIONS);
+  var data = sheet.getDataRange().getValues();
 
-    const typeIcons = {
-      'رئيسي': '🏦',
-      'عهدة': '👤',
-      'مستفيد': '🎁',
-      'ادخار': '💎',
-      'استثمار': '📈',
-      'شخصي': '👨'
+  var currentDate = new Date();
+  month = month || currentDate.getMonth() + 1;
+  year = year || currentDate.getFullYear();
+
+  var result = {
+    month: month,
+    year: year,
+    income: emptyBalance(),
+    incomeByItem: {},
+    expenseByAccount: {},   // {accountCode: {total: {}, items: {itemName: {}}}}
+    transfersByDest: {},     // {accountCode: {primary: {}, converted: {}}}
+    allTransactions: []
+  };
+
+  // 0:ID, 1:Date, 2:Time, 3:Nature, 4:Category, 5:Item, 6:Amount, 7:Currency
+  // 8:FromAccount, 9:ToAccount, 10:ConvertedAmount, 11:ConvertedCurrency, 12:ExchangeRate, 13:Description
+
+  for (var i = 1; i < data.length; i++) {
+    var rowDate = new Date(data[i][1]);
+    if (isNaN(rowDate.getTime())) continue;
+    if (rowDate.getMonth() + 1 !== month || rowDate.getFullYear() !== year) continue;
+
+    var nature = data[i][3];
+    var category = data[i][4] || '';
+    var item = data[i][5] || category;
+    var amount = parseFloat(data[i][6]) || 0;
+    var currency = normalizeCurrency(data[i][7]) || 'SAR';
+    var fromAccount = data[i][8] || '';
+    var toAccount = data[i][9] || '';
+    var convertedAmount = parseFloat(data[i][10]) || 0;
+    var convertedCurrency = normalizeCurrency(data[i][11]) || '';
+    var exchangeRate = parseFloat(data[i][12]) || 0;
+    var description = data[i][13] || '';
+
+    var trans = {
+      date: rowDate, nature: nature, category: category, item: item,
+      amount: amount, currency: currency,
+      fromAccount: fromAccount, toAccount: toAccount,
+      convertedAmount: convertedAmount, convertedCurrency: convertedCurrency,
+      exchangeRate: exchangeRate, description: description
     };
+    result.allTransactions.push(trans);
 
-    // Display each type
-    for (const [type, typeAccounts] of Object.entries(accountsByType)) {
-      const icon = typeIcons[type] || '📋';
-      report += `${icon} *${type}:*\n`;
+    if (nature === 'إيراد') {
+      result.income[currency] = (result.income[currency] || 0) + amount;
+      if (!result.incomeByItem[item]) result.incomeByItem[item] = emptyBalance();
+      result.incomeByItem[item][currency] = (result.incomeByItem[item][currency] || 0) + amount;
 
-      typeAccounts.forEach(acc => {
-        if (acc.balance.SAR !== 0 || acc.balance.EGP !== 0 || acc.balance.USD !== 0) {
-          report += `   ${acc.name}:\n`;
-          if (acc.balance.SAR !== 0) report += `      ${formatNumber(acc.balance.SAR)} ر.س\n`;
-          if (acc.balance.EGP !== 0) report += `      ${formatNumber(acc.balance.EGP)} ج.م\n`;
-          if (acc.balance.USD !== 0) report += `      ${formatNumber(acc.balance.USD)} $\n`;
+    } else if (nature === 'مصروف') {
+      var expAccount = fromAccount || 'MAIN';
+      if (!result.expenseByAccount[expAccount]) {
+        result.expenseByAccount[expAccount] = { total: emptyBalance(), items: {} };
+      }
+      result.expenseByAccount[expAccount].total[currency] = (result.expenseByAccount[expAccount].total[currency] || 0) + amount;
+      if (!result.expenseByAccount[expAccount].items[item]) {
+        result.expenseByAccount[expAccount].items[item] = emptyBalance();
+      }
+      result.expenseByAccount[expAccount].items[item][currency] = (result.expenseByAccount[expAccount].items[item][currency] || 0) + amount;
+
+    } else if (nature === 'تحويل') {
+      if (toAccount) {
+        if (!result.transfersByDest[toAccount]) {
+          result.transfersByDest[toAccount] = { primary: emptyBalance(), converted: emptyBalance() };
         }
-      });
-      report += `\n`;
+        result.transfersByDest[toAccount].primary[currency] = (result.transfersByDest[toAccount].primary[currency] || 0) + amount;
+        if (convertedAmount && convertedCurrency) {
+          result.transfersByDest[toAccount].converted[convertedCurrency] = (result.transfersByDest[toAccount].converted[convertedCurrency] || 0) + convertedAmount;
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+// ============================================
+// 1. التقرير الشامل الموحد
+// ============================================
+
+function generateUnifiedReport(month, year) {
+  try {
+    var data = getMonthlyTransactionData(month, year);
+    var accounts = getAllAccounts();
+
+    var monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+                      'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+
+    var r = '📊 *تقرير شهر ' + monthNames[data.month - 1] + ' ' + data.year + '*\n';
+    r += '━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
+
+    // ═══ الدخل ═══
+    r += '💰 *الدخل:*\n';
+    var hasIncome = false;
+    for (var itemName in data.incomeByItem) {
+      r += '   • ' + itemName + ': ' + formatMultiCurrency(data.incomeByItem[itemName]) + '\n';
+      hasIncome = true;
+    }
+    if (!hasIncome) r += '   لا يوجد\n';
+    r += '   ─────\n';
+    r += '   إجمالي: ' + formatMultiCurrency(data.income) + '\n\n';
+
+    // ═══ التحويلات ═══
+    r += '📤 *التحويلات من الخزنة:*\n';
+    var totalTransferPrimary = emptyBalance();
+    var hasTransfers = false;
+    var custodyAccounts = accounts.filter(function(a) { return a.type === 'عهدة'; });
+
+    for (var ti = 0; ti < custodyAccounts.length; ti++) {
+      var acc = custodyAccounts[ti];
+      var trData = data.transfersByDest[acc.code];
+      if (!trData) continue;
+
+      var hasPrimary = false;
+      for (var c in trData.primary) { if (trData.primary[c] > 0) hasPrimary = true; }
+      if (!hasPrimary) continue;
+
+      hasTransfers = true;
+      var line = '   • ' + acc.responsible + ': ' + formatMultiCurrency(trData.primary);
+
+      // إذا يوجد مبلغ محول
+      var hasConverted = false;
+      for (var c2 in trData.converted) { if (trData.converted[c2] > 0) hasConverted = true; }
+      if (hasConverted) {
+        line += ' (= ' + formatMultiCurrency(trData.converted) + ')';
+      }
+      r += line + '\n';
+      totalTransferPrimary = addBalances(totalTransferPrimary, trData.primary);
+    }
+    if (!hasTransfers) r += '   لا يوجد\n';
+    else {
+      r += '   ─────\n';
+      r += '   إجمالي: ' + formatMultiCurrency(totalTransferPrimary) + '\n';
+    }
+    r += '\n';
+
+    // ═══ المصروفات حسب الحساب ═══
+    r += '💸 *المصروفات:*\n\n';
+
+    // ترتيب الحسابات: الرئيسي أولاً ثم العهد
+    var accountOrder = ['MAIN'];
+    for (var ci = 0; ci < custodyAccounts.length; ci++) {
+      accountOrder.push(custodyAccounts[ci].code);
     }
 
-    // Calculate totals
-    let totalSAR = 0;
-    let totalEGP = 0;
+    var totalExpenseAll = emptyBalance();
 
-    accounts.forEach(account => {
-      if (account.type === 'رئيسي' || account.type === 'ادخار') {
-        const balance = calculateAccountBalance(account.code);
-        totalSAR += balance.SAR || 0;
-        totalEGP += balance.EGP || 0;
+    for (var ai = 0; ai < accountOrder.length; ai++) {
+      var accCode = accountOrder[ai];
+      var expData = data.expenseByAccount[accCode];
+      if (!expData) continue;
+
+      var accInfo = accounts.find(function(a) { return a.code === accCode; });
+      var accEmoji = accCode === 'MAIN' ? '👤' : '💼';
+      var accName = accCode === 'MAIN' ? 'الخزنة الرئيسية' : (accInfo ? accInfo.responsible : accCode);
+
+      r += accEmoji + ' *' + accName + ' صرف:* ' + formatMultiCurrency(expData.total) + '\n';
+
+      // تفاصيل البنود
+      var sortedItems = Object.entries(expData.items).sort(function(a, b) {
+        var totalA = (a[1].SAR || 0) + (a[1].EGP || 0) + (a[1].USD || 0);
+        var totalB = (b[1].SAR || 0) + (b[1].EGP || 0) + (b[1].USD || 0);
+        return totalB - totalA;
+      });
+      for (var si = 0; si < sortedItems.length; si++) {
+        r += '   • ' + sortedItems[si][0] + ': ' + formatMultiCurrency(sortedItems[si][1]) + '\n';
       }
-    });
+      r += '\n';
+      totalExpenseAll = addBalances(totalExpenseAll, expData.total);
+    }
 
-    report += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    report += `📊 *إجمالي الرصيد (الرئيسي + الادخار):*\n`;
-    report += `   ${formatNumber(totalSAR)} ر.س\n`;
-    report += `   ${formatNumber(totalEGP)} ج.م`;
+    // ═══ الجمعيات ═══
+    try {
+      var assocSheet = getOrCreateSheet(SHEETS.ASSOCIATIONS);
+      var assocData = assocSheet.getDataRange().getValues();
+      var assocTotal = emptyBalance();
+      var hasAssoc = false;
 
-    return report;
+      r += '🔄 *الجمعيات:*\n';
+      for (var ai2 = 1; ai2 < assocData.length; ai2++) {
+        if (assocData[ai2][8] === 'نشط' || assocData[ai2][8] === 'active') {
+          var assocName = assocData[ai2][1];
+          var assocAmount = parseFloat(assocData[ai2][2]) || 0;
+          var assocCur = normalizeCurrency(assocData[ai2][9]) || 'EGP';
+          r += '   • ' + assocName + ': ' + formatNumber(assocAmount) + ' ' + getCurrencySymbol(assocCur) + '/شهر\n';
+          assocTotal[assocCur] = (assocTotal[assocCur] || 0) + assocAmount;
+          hasAssoc = true;
+        }
+      }
+      if (!hasAssoc) r += '   لا يوجد\n';
+      r += '\n';
+    } catch (e) {
+      r += '🔄 *الجمعيات:* لا يوجد\n\n';
+    }
+
+    // ═══ الذهب ═══
+    try {
+      var goldSheet = getOrCreateSheet(SHEETS.GOLD);
+      var goldData = goldSheet.getDataRange().getValues();
+      var totalGrams = 0;
+      var goldValue = emptyBalance();
+
+      for (var gi = 1; gi < goldData.length; gi++) {
+        totalGrams += parseFloat(goldData[gi][2]) || 0;
+        var gPrice = parseFloat(goldData[gi][4]) || 0;
+        var gCur = normalizeCurrency(goldData[gi][5]) || 'EGP';
+        goldValue[gCur] = (goldValue[gCur] || 0) + gPrice;
+      }
+
+      r += '💍 *الذهب:* ';
+      if (totalGrams > 0) {
+        r += totalGrams.toFixed(2) + ' جرام (' + formatMultiCurrency(goldValue) + ')\n\n';
+      } else {
+        r += 'لا يوجد\n\n';
+      }
+    } catch (e) {
+      r += '💍 *الذهب:* لا يوجد\n\n';
+    }
+
+    // ═══ الملخص العام ═══
+    r += '━━━━━━━━━━━━━━━━━━━━━━━━\n';
+    r += '📊 *الملخص:*\n\n';
+
+    // رصيد الخزنة
+    var mainBalance = calculateAccountBalance('MAIN');
+    r += '💵 *الخزنة الرئيسية:*\n';
+    r += '   ' + formatMultiCurrency(mainBalance) + '\n\n';
+
+    // أرصدة العهد
+    r += '💼 *أرصدة العهد:*\n';
+    var totalCustody = emptyBalance();
+    for (var cai = 0; cai < custodyAccounts.length; cai++) {
+      var cAcc = custodyAccounts[cai];
+      var cBal = calculateAccountBalance(cAcc.code);
+      var hasBal = false;
+      for (var bc in cBal) { if (cBal[bc] && Math.abs(cBal[bc]) > 0.01) hasBal = true; }
+      if (hasBal) {
+        r += '   • ' + cAcc.responsible + ': ' + formatMultiCurrency(cBal) + '\n';
+        totalCustody = addBalances(totalCustody, cBal);
+      }
+    }
+    r += '   ─────\n';
+    r += '   إجمالي: ' + formatMultiCurrency(totalCustody) + '\n';
+
+    return r;
 
   } catch (error) {
-    Logger.log('Error generating balances report: ' + error.toString());
-    return 'حدث خطأ أثناء إنشاء التقرير';
+    Logger.log('Error in generateUnifiedReport: ' + error.toString());
+    return '❌ حدث خطأ أثناء إنشاء التقرير: ' + error.message;
   }
 }
 
-/**
- * Generate custody accounts report
- * تقرير حسابات العهدة
- * @returns {string} Formatted report
- */
-function generateCustodyReport() {
-  try {
-    const accounts = getAllAccounts();
-    const custodyAccounts = accounts.filter(acc => acc.type === 'عهدة');
-
-    let report = `👤 *تقرير حسابات العهدة*\n`;
-    report += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
-
-    let totalEGP = 0;
-    let totalSAR = 0;
-
-    custodyAccounts.forEach(account => {
-      const balance = calculateAccountBalance(account.code);
-      const hasBalance = balance.SAR !== 0 || balance.EGP !== 0;
-
-      if (hasBalance) {
-        report += `👤 *${account.name}*\n`;
-        if (balance.SAR !== 0) {
-          report += `   ${formatNumber(balance.SAR)} ر.س\n`;
-          totalSAR += balance.SAR;
-        }
-        if (balance.EGP !== 0) {
-          report += `   ${formatNumber(balance.EGP)} ج.م\n`;
-          totalEGP += balance.EGP;
-        }
-        report += `\n`;
-      }
-    });
-
-    report += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    report += `📊 *إجمالي العهد:*\n`;
-    if (totalSAR !== 0) report += `   ${formatNumber(totalSAR)} ر.س\n`;
-    if (totalEGP !== 0) report += `   ${formatNumber(totalEGP)} ج.م`;
-
-    return report;
-
-  } catch (error) {
-    Logger.log('Error generating custody report: ' + error.toString());
-    return 'حدث خطأ أثناء إنشاء التقرير';
-  }
+// للتوافق - الدالة القديمة تستدعي الجديدة
+function generateMonthlySummary(month, year) {
+  return generateUnifiedReport(month, year);
 }
 
-/**
- * Generate account statement
- * كشف حساب لحساب معين
- * @param {string} accountCode - Account code
- * @param {number} month - Month (optional)
- * @param {number} year - Year (optional)
- * @returns {string} Formatted report
- */
+// ============================================
+// 2. كشف حساب تفصيلي
+// ============================================
+
 function generateAccountStatement(accountCode, month, year) {
   try {
-    const sheet = getOrCreateSheet(SHEETS.TRANSACTIONS);
-    const data = sheet.getDataRange().getValues();
+    var sheet = getOrCreateSheet(SHEETS.TRANSACTIONS);
+    var data = sheet.getDataRange().getValues();
+    var accounts = getAllAccounts();
 
-    const currentDate = new Date();
+    var currentDate = new Date();
     month = month || currentDate.getMonth() + 1;
     year = year || currentDate.getFullYear();
 
-    // Get account info
-    const accounts = getAllAccounts();
-    const account = accounts.find(acc => acc.code === accountCode);
-    const accountName = account ? account.name : accountCode;
+    var account = accounts.find(function(a) { return a.code === accountCode; });
+    var accountName = account ? account.name : accountCode;
+    var accountResp = account ? account.responsible : accountCode;
 
-    const transactions = [];
-    let runningBalance = { SAR: 0, EGP: 0, USD: 0 };
+    var transactions = [];
+    var monthIncome = emptyBalance();
+    var monthExpense = emptyBalance();
+    var monthTransferIn = emptyBalance();
+    var monthTransferOut = emptyBalance();
 
-    // Transaction columns in new format:
     // 0:ID, 1:Date, 2:Time, 3:Nature, 4:Category, 5:Item, 6:Amount, 7:Currency
-    // 8:FromAccount, 9:ToAccount, 10:ConvertedAmount, 11:ConvertedCurrency, etc.
+    // 8:FromAccount, 9:ToAccount, 10:ConvertedAmount, 11:ConvertedCurrency, 12:ExchangeRate, 13:Description
 
-    for (let i = 1; i < data.length; i++) {
-      const rowDate = new Date(data[i][1]);
-      const nature = data[i][3];
-      const item = data[i][5];
-      const amount = parseFloat(data[i][6]) || 0;
-      const currency = normalizeCurrency(data[i][7]) || 'SAR';
-      const fromAccount = data[i][8];
-      const toAccount = data[i][9];
-      const convertedAmount = parseFloat(data[i][10]) || 0;
-      const convertedCurrency = normalizeCurrency(data[i][11]) || '';
-      const description = data[i][13];
+    for (var i = 1; i < data.length; i++) {
+      var rowDate = new Date(data[i][1]);
+      if (isNaN(rowDate.getTime())) continue;
+      if (rowDate.getMonth() + 1 !== month || rowDate.getFullYear() !== year) continue;
 
-      // Check if this transaction affects our account
-      let transactionAmount = 0;
-      let transactionCurrency = currency;
-      let transactionType = '';
+      var nature = data[i][3];
+      var item = data[i][5] || data[i][4] || '';
+      var amount = parseFloat(data[i][6]) || 0;
+      var currency = normalizeCurrency(data[i][7]) || 'SAR';
+      var fromAccount = data[i][8] || '';
+      var toAccount = data[i][9] || '';
+      var convertedAmount = parseFloat(data[i][10]) || 0;
+      var convertedCurrency = normalizeCurrency(data[i][11]) || '';
+      var exchangeRate = parseFloat(data[i][12]) || 0;
+      var description = data[i][13] || '';
+
+      var transAmount = 0;
+      var transCurrency = currency;
+      var transType = '';
+      var transDetail = '';
 
       if (fromAccount === accountCode) {
-        // Money going out
-        transactionAmount = -amount;
-        transactionType = 'صادر';
-      } else if (toAccount === accountCode) {
-        // Money coming in
-        if (convertedAmount && convertedCurrency) {
-          transactionAmount = convertedAmount;
-          transactionCurrency = convertedCurrency;
+        transAmount = -amount;
+        transCurrency = currency;
+        transType = '📤';
+
+        if (nature === 'تحويل' && toAccount) {
+          var destAcc = accounts.find(function(a) { return a.code === toAccount; });
+          transDetail = '→ ' + (destAcc ? destAcc.responsible : toAccount);
+          monthTransferOut[currency] = (monthTransferOut[currency] || 0) + amount;
         } else {
-          transactionAmount = amount;
+          monthExpense[currency] = (monthExpense[currency] || 0) + amount;
         }
-        transactionType = 'وارد';
+
+      } else if (toAccount === accountCode) {
+        // إذا في مبلغ محول - نعرض ما وصل فعلاً
+        if (convertedAmount && convertedCurrency) {
+          transAmount = convertedAmount;
+          transCurrency = convertedCurrency;
+        } else {
+          transAmount = amount;
+          transCurrency = currency;
+        }
+        transType = '📥';
+
+        if (nature === 'تحويل' && fromAccount) {
+          var srcAcc = accounts.find(function(a) { return a.code === fromAccount; });
+          transDetail = '← ' + (srcAcc ? srcAcc.responsible : fromAccount);
+
+          // عرض تفاصيل التحويل
+          if (convertedAmount && convertedCurrency && currency !== convertedCurrency) {
+            transDetail += ' (' + formatNumber(amount) + ' ' + getCurrencySymbol(currency);
+            if (exchangeRate) transDetail += ' بسعر ' + exchangeRate;
+            transDetail += ')';
+          }
+
+          monthTransferIn[transCurrency] = (monthTransferIn[transCurrency] || 0) + Math.abs(transAmount);
+        } else {
+          monthIncome[transCurrency] = (monthIncome[transCurrency] || 0) + Math.abs(transAmount);
+        }
+
+      } else {
+        continue; // حركة لا تخص هذا الحساب
       }
 
-      if (transactionAmount !== 0) {
-        // Update running balance
-        runningBalance[transactionCurrency] = (runningBalance[transactionCurrency] || 0) + transactionAmount;
-
-        // Filter by month if specified
-        if (rowDate.getMonth() + 1 === month && rowDate.getFullYear() === year) {
-          transactions.push({
-            date: rowDate,
-            nature: nature,
-            item: item,
-            amount: transactionAmount,
-            currency: transactionCurrency,
-            type: transactionType,
-            description: description,
-            balance: { ...runningBalance }
-          });
-        }
-      }
+      transactions.push({
+        date: rowDate,
+        type: transType,
+        item: item,
+        amount: transAmount,
+        currency: transCurrency,
+        detail: transDetail,
+        description: description
+      });
     }
 
-    const monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-                        'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+    var monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+                      'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
 
-    let report = `📋 *كشف حساب: ${accountName}*\n`;
-    report += `📅 *${monthNames[month-1]} ${year}*\n`;
-    report += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    // ═══ بناء التقرير ═══
+    var r = '📋 *كشف حساب: ' + accountName + '*\n';
+    r += '📅 ' + monthNames[month - 1] + ' ' + year + '\n';
+    r += '━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
+
+    // الرصيد الحالي
+    var currentBalance = calculateAccountBalance(accountCode);
+    r += '💰 *الرصيد الحالي:*\n';
+    r += '   ' + formatMultiCurrency(currentBalance) + '\n\n';
+
+    // ملخص الشهر
+    r += '📊 *ملخص الشهر:*\n';
+    var hasMonthIncome = false;
+    for (var k in monthIncome) { if (monthIncome[k] > 0) hasMonthIncome = true; }
+    if (hasMonthIncome) r += '   📥 إيراد: ' + formatMultiCurrency(monthIncome) + '\n';
+
+    var hasMonthTrIn = false;
+    for (var k2 in monthTransferIn) { if (monthTransferIn[k2] > 0) hasMonthTrIn = true; }
+    if (hasMonthTrIn) r += '   📥 وارد (تحويل): ' + formatMultiCurrency(monthTransferIn) + '\n';
+
+    var hasMonthExp = false;
+    for (var k3 in monthExpense) { if (monthExpense[k3] > 0) hasMonthExp = true; }
+    if (hasMonthExp) r += '   💸 مصروف: ' + formatMultiCurrency(monthExpense) + '\n';
+
+    var hasMonthTrOut = false;
+    for (var k4 in monthTransferOut) { if (monthTransferOut[k4] > 0) hasMonthTrOut = true; }
+    if (hasMonthTrOut) r += '   📤 صادر (تحويل): ' + formatMultiCurrency(monthTransferOut) + '\n';
+
+    r += '\n━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
+
+    // الحركات
+    r += '📝 *الحركات:*\n\n';
 
     if (transactions.length === 0) {
-      report += `لا توجد حركات في هذا الشهر\n`;
+      r += '   لا توجد حركات هذا الشهر\n';
     } else {
-      transactions.forEach(trans => {
-        const dateStr = Utilities.formatDate(trans.date, 'Asia/Riyadh', 'dd/MM');
-        const amountStr = trans.amount > 0 ? `+${formatNumber(trans.amount)}` : formatNumber(trans.amount);
-        const symbol = getCurrencySymbol(trans.currency);
+      for (var ti = 0; ti < transactions.length; ti++) {
+        var tr = transactions[ti];
+        var dateStr = Utilities.formatDate(tr.date, 'Asia/Riyadh', 'dd/MM');
+        var amountStr = (tr.amount > 0 ? '+' : '') + formatNumber(tr.amount) + ' ' + getCurrencySymbol(tr.currency);
 
-        report += `${dateStr} | ${trans.type}\n`;
-        report += `   ${trans.item || trans.nature}\n`;
-        report += `   ${amountStr} ${symbol}\n`;
-        if (trans.description) report += `   (${trans.description})\n`;
-        report += `\n`;
-      });
+        r += dateStr + '  ' + tr.type + '  ' + amountStr + '\n';
+        if (tr.item) r += '       ' + tr.item;
+        if (tr.detail) r += ' ' + tr.detail;
+        r += '\n';
+        if (tr.description && tr.description !== tr.item) r += '       ' + tr.description + '\n';
+        r += '\n';
+      }
     }
 
-    // Current balance
-    const currentBalance = calculateAccountBalance(accountCode);
-    report += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    report += `💰 *الرصيد الحالي:*\n`;
-    if (currentBalance.SAR !== 0) report += `   ${formatNumber(currentBalance.SAR)} ر.س\n`;
-    if (currentBalance.EGP !== 0) report += `   ${formatNumber(currentBalance.EGP)} ج.م\n`;
-    if (currentBalance.USD !== 0) report += `   ${formatNumber(currentBalance.USD)} $\n`;
-
-    return report;
+    return r;
 
   } catch (error) {
-    Logger.log('Error generating account statement: ' + error.toString());
-    return 'حدث خطأ أثناء إنشاء التقرير';
+    Logger.log('Error in generateAccountStatement: ' + error.toString());
+    return '❌ حدث خطأ: ' + error.message;
   }
 }
 
 // ============================================
-// التقارير الشهرية
+// 3. تقرير الجمعيات
 // ============================================
 
-/**
- * Generate monthly summary report
- * تقرير ملخص الشهر
- * @param {number} month - Month (1-12)
- * @param {number} year - Year
- * @returns {string} Formatted report
- */
-function generateMonthlySummary(month, year) {
-  try {
-    const sheet = getOrCreateSheet(SHEETS.TRANSACTIONS);
-    const data = sheet.getDataRange().getValues();
-
-    const currentDate = new Date();
-    month = month || currentDate.getMonth() + 1;
-    year = year || currentDate.getFullYear();
-
-    let totalIncome = { SAR: 0, EGP: 0 };
-    let totalExpense = { SAR: 0, EGP: 0 };
-    let totalTransfers = { SAR: 0, EGP: 0 };
-
-    const expensesByItem = {};      // {item: {SAR: x, EGP: y}}
-    const incomeByItem = {};        // {item: {SAR: x, EGP: y}}
-    const transfersByAccount = {};  // {account: {SAR: x, EGP: y}}
-
-    // Transaction columns:
-    // 0:ID, 1:Date, 2:Time, 3:Nature, 4:Category, 5:Item, 6:Amount, 7:Currency
-    // 8:FromAccount, 9:ToAccount, 10:ConvertedAmount, 11:ConvertedCurrency, 12:ExchangeRate
-
-    for (let i = 1; i < data.length; i++) {
-      const rowDate = new Date(data[i][1]);
-      if (rowDate.getMonth() + 1 === month && rowDate.getFullYear() === year) {
-        const nature = data[i][3];
-        const item = data[i][5] || data[i][4];
-        const amount = parseFloat(data[i][6]) || 0;
-        const currency = normalizeCurrency(data[i][7]) || 'SAR';
-        const toAccount = data[i][9];
-        const convertedAmount = parseFloat(data[i][10]) || 0;
-        const convertedCurrency = normalizeCurrency(data[i][11]) || '';
-
-        if (nature === 'إيراد') {
-          totalIncome[currency] = (totalIncome[currency] || 0) + amount;
-          if (!incomeByItem[item]) incomeByItem[item] = { SAR: 0, EGP: 0 };
-          incomeByItem[item][currency] = (incomeByItem[item][currency] || 0) + amount;
-        } else if (nature === 'مصروف') {
-          totalExpense[currency] = (totalExpense[currency] || 0) + amount;
-          if (!expensesByItem[item]) expensesByItem[item] = { SAR: 0, EGP: 0 };
-          expensesByItem[item][currency] = (expensesByItem[item][currency] || 0) + amount;
-        } else if (nature === 'تحويل') {
-          // المبلغ الأصلي (ما خرج من المصدر)
-          totalTransfers[currency] = (totalTransfers[currency] || 0) + amount;
-
-          // لكل حساب وجهة: نظهر المبلغ المحول إن وجد (ما وصل فعلاً)
-          if (toAccount) {
-            if (!transfersByAccount[toAccount]) transfersByAccount[toAccount] = { SAR: 0, EGP: 0 };
-            if (convertedAmount && convertedCurrency) {
-              // يوجد مبلغ محول - نستخدمه (ما استلمه الحساب فعلاً)
-              transfersByAccount[toAccount][convertedCurrency] = (transfersByAccount[toAccount][convertedCurrency] || 0) + convertedAmount;
-            } else {
-              // لا يوجد تحويل عملة - نستخدم المبلغ الأصلي
-              transfersByAccount[toAccount][currency] = (transfersByAccount[toAccount][currency] || 0) + amount;
-            }
-          }
-        }
-      }
-    }
-
-    const monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-                        'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
-
-    let report = `📊 *تقرير شهر ${monthNames[month-1]} ${year}*\n`;
-    report += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
-
-    // Income
-    report += `💰 *الإيرادات:*\n`;
-    if (totalIncome.SAR) report += `   ${formatNumber(totalIncome.SAR)} ر.س\n`;
-    if (totalIncome.EGP) report += `   ${formatNumber(totalIncome.EGP)} ج.م\n`;
-    if (!totalIncome.SAR && !totalIncome.EGP) report += `   لا يوجد\n`;
-    report += `\n`;
-
-    // Expenses
-    report += `💸 *المصروفات:*\n`;
-    if (totalExpense.SAR) report += `   ${formatNumber(totalExpense.SAR)} ر.س\n`;
-    if (totalExpense.EGP) report += `   ${formatNumber(totalExpense.EGP)} ج.م\n`;
-    if (!totalExpense.SAR && !totalExpense.EGP) report += `   لا يوجد\n`;
-    report += `\n`;
-
-    // Transfers
-    report += `📤 *التحويلات:*\n`;
-    if (totalTransfers.SAR) report += `   ${formatNumber(totalTransfers.SAR)} ر.س\n`;
-    if (totalTransfers.EGP) report += `   ${formatNumber(totalTransfers.EGP)} ج.م\n`;
-    if (!totalTransfers.SAR && !totalTransfers.EGP) report += `   لا يوجد\n`;
-    report += `\n`;
-
-    // Income breakdown
-    if (Object.keys(incomeByItem).length > 0) {
-      report += `📋 *الإيرادات حسب البند:*\n`;
-      for (const [item, amounts] of Object.entries(incomeByItem)) {
-        report += `   • ${item}: ${formatDualCurrency(amounts)}\n`;
-      }
-      report += `\n`;
-    }
-
-    // Expenses breakdown
-    if (Object.keys(expensesByItem).length > 0) {
-      report += `📋 *المصروفات حسب البند:*\n`;
-      const sortedExpenses = Object.entries(expensesByItem).sort((a, b) => {
-        return (b[1].SAR + b[1].EGP) - (a[1].SAR + a[1].EGP);
-      });
-      sortedExpenses.slice(0, 10).forEach(([item, amounts]) => {
-        report += `   • ${item}: ${formatDualCurrency(amounts)}\n`;
-      });
-      report += `\n`;
-    }
-
-    // Transfers breakdown
-    if (Object.keys(transfersByAccount).length > 0) {
-      report += `👥 *التحويلات حسب الحساب:*\n`;
-      const accounts = getAllAccounts();
-      for (const [accountCode, amounts] of Object.entries(transfersByAccount)) {
-        const account = accounts.find(a => a.code === accountCode);
-        const displayName = account ? account.name : accountCode;
-        report += `   • ${displayName}: ${formatDualCurrency(amounts)}\n`;
-      }
-      report += `\n`;
-    }
-
-    // Net calculation
-    const netSAR = (totalIncome.SAR || 0) - (totalExpense.SAR || 0) - (totalTransfers.SAR || 0);
-    const netEGP = (totalIncome.EGP || 0) - (totalExpense.EGP || 0) - (totalTransfers.EGP || 0);
-
-    report += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    report += `📈 *صافي الشهر:*\n`;
-    if (netSAR !== 0) report += `   ${formatNumber(netSAR)} ر.س\n`;
-    if (netEGP !== 0) report += `   ${formatNumber(netEGP)} ج.م\n`;
-    if (netSAR === 0 && netEGP === 0) report += `   0\n`;
-
-    return report;
-
-  } catch (error) {
-    Logger.log('Error generating monthly summary: ' + error.toString());
-    return 'حدث خطأ أثناء إنشاء التقرير';
-  }
-}
-
-// ============================================
-// تقارير خاصة بالأشخاص
-// ============================================
-
-/**
- * Generate wife report
- * تقرير الزوجة
- * @param {number} month - Month (optional)
- * @param {number} year - Year (optional)
- * @returns {string} Formatted report
- */
-function generateWifeReport(month, year) {
-  try {
-    const currentDate = new Date();
-    month = month || currentDate.getMonth() + 1;
-    year = year || currentDate.getFullYear();
-
-    // Find wife account
-    const accounts = getAllAccounts();
-    const wifeAccount = accounts.find(acc =>
-      acc.name.includes('my love') ||
-      acc.name.includes('زوجة') ||
-      acc.code === 'WIFE'
-    );
-
-    if (!wifeAccount) {
-      return '❌ لم يتم العثور على حساب الزوجة';
-    }
-
-    // Get balance
-    const balance = calculateAccountBalance(wifeAccount.code);
-
-    // Get transactions for this month
-    const sheet = getOrCreateSheet(SHEETS.TRANSACTIONS);
-    const data = sheet.getDataRange().getValues();
-
-    let totalReceived = 0;
-    let totalSpent = 0;
-    let totalSavings = 0;
-    const transactions = [];
-
-    for (let i = 1; i < data.length; i++) {
-      const rowDate = new Date(data[i][1]);
-      if (rowDate.getMonth() + 1 === month && rowDate.getFullYear() === year) {
-        const toAccount = data[i][9];
-        const fromAccount = data[i][8];
-        const item = data[i][5];
-        const convertedAmount = parseFloat(data[i][10]) || parseFloat(data[i][6]) || 0;
-        const description = data[i][13];
-
-        if (toAccount === wifeAccount.code) {
-          totalReceived += convertedAmount;
-          if (item && item.includes('ادخار')) {
-            totalSavings += convertedAmount;
-          }
-          transactions.push({
-            date: rowDate,
-            amount: convertedAmount,
-            type: 'وارد',
-            item: item,
-            description: description
-          });
-        } else if (fromAccount === wifeAccount.code) {
-          totalSpent += convertedAmount;
-          transactions.push({
-            date: rowDate,
-            amount: -convertedAmount,
-            type: 'صادر',
-            item: item,
-            description: description
-          });
-        }
-      }
-    }
-
-    const monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-                        'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
-
-    let report = `💕 *تقرير ${wifeAccount.name} - ${monthNames[month-1]} ${year}*\n`;
-    report += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
-
-    report += `📥 *إجمالي المستلم:* ${formatNumber(totalReceived)} ج.م\n`;
-    report += `💸 *إجمالي المصروف:* ${formatNumber(totalSpent)} ج.م\n`;
-    if (totalSavings > 0) {
-      report += `🏦 *منها للادخار:* ${formatNumber(totalSavings)} ج.م\n`;
-    }
-    report += `\n`;
-
-    // Current balance
-    report += `💰 *الرصيد الحالي:*\n`;
-    if (balance.EGP !== 0) report += `   ${formatNumber(balance.EGP)} ج.م\n`;
-    if (balance.SAR !== 0) report += `   ${formatNumber(balance.SAR)} ر.س\n`;
-    report += `\n`;
-
-    // Recent transactions
-    if (transactions.length > 0) {
-      report += `📋 *آخر الحركات:*\n`;
-      transactions.slice(-10).forEach(trans => {
-        const dateStr = Utilities.formatDate(trans.date, 'Asia/Riyadh', 'dd/MM');
-        const amountStr = trans.amount > 0 ? `+${formatNumber(trans.amount)}` : formatNumber(trans.amount);
-        report += `   ${dateStr} - ${amountStr} ج.م`;
-        if (trans.item) report += ` (${trans.item})`;
-        report += `\n`;
-      });
-    }
-
-    return report;
-
-  } catch (error) {
-    Logger.log('Error generating wife report: ' + error.toString());
-    return 'حدث خطأ أثناء إنشاء التقرير';
-  }
-}
-
-/**
- * Generate siblings help report
- * تقرير مساعدة الإخوة
- * @param {number} month - Month (optional)
- * @param {number} year - Year (optional)
- * @returns {string} Formatted report
- */
-function generateSiblingsReport(month, year) {
-  try {
-    const currentDate = new Date();
-    month = month || currentDate.getMonth() + 1;
-    year = year || currentDate.getFullYear();
-
-    const accounts = getAllAccounts();
-
-    // Find sibling accounts (custody type)
-    const siblingNames = ['سارة', 'هاجر', 'محمد', 'مصطفى', 'sara', 'hagar', 'mohamed', 'mostafa'];
-    const siblingAccounts = accounts.filter(acc =>
-      acc.type === 'عهدة' &&
-      siblingNames.some(name => acc.name.toLowerCase().includes(name.toLowerCase()))
-    );
-
-    const sheet = getOrCreateSheet(SHEETS.TRANSACTIONS);
-    const data = sheet.getDataRange().getValues();
-
-    const siblingTotals = {};
-    const siblingBalances = {};
-
-    siblingAccounts.forEach(acc => {
-      siblingTotals[acc.code] = { received: 0, spent: 0, name: acc.name };
-      siblingBalances[acc.code] = calculateAccountBalance(acc.code);
-    });
-
-    // Calculate monthly totals
-    for (let i = 1; i < data.length; i++) {
-      const rowDate = new Date(data[i][1]);
-      if (rowDate.getMonth() + 1 === month && rowDate.getFullYear() === year) {
-        const toAccount = data[i][9];
-        const fromAccount = data[i][8];
-        const convertedAmount = parseFloat(data[i][10]) || parseFloat(data[i][6]) || 0;
-
-        if (siblingTotals[toAccount]) {
-          siblingTotals[toAccount].received += convertedAmount;
-        }
-        if (siblingTotals[fromAccount]) {
-          siblingTotals[fromAccount].spent += convertedAmount;
-        }
-      }
-    }
-
-    const monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-                        'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
-
-    const contactIcons = {
-      'سارة': '👧',
-      'هاجر': '👧',
-      'محمد': '👦',
-      'مصطفى': '👦'
-    };
-
-    let report = `👨‍👩‍👧‍👦 *تقرير الإخوة - ${monthNames[month-1]} ${year}*\n`;
-    report += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
-
-    let grandTotalReceived = 0;
-
-    for (const [code, totals] of Object.entries(siblingTotals)) {
-      const balance = siblingBalances[code];
-      let icon = '👤';
-      for (const [name, emoji] of Object.entries(contactIcons)) {
-        if (totals.name.includes(name)) {
-          icon = emoji;
-          break;
-        }
-      }
-
-      report += `${icon} *${totals.name}*\n`;
-      report += `   📥 استلم هذا الشهر: ${formatNumber(totals.received)} ج.م\n`;
-      if (totals.spent > 0) {
-        report += `   📤 صرف: ${formatNumber(totals.spent)} ج.م\n`;
-      }
-      report += `   💰 الرصيد: ${formatNumber(balance.EGP || 0)} ج.م\n`;
-      report += `\n`;
-
-      grandTotalReceived += totals.received;
-    }
-
-    report += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    report += `📊 *إجمالي المرسل هذا الشهر:* ${formatNumber(grandTotalReceived)} ج.م`;
-
-    return report;
-
-  } catch (error) {
-    Logger.log('Error generating siblings report: ' + error.toString());
-    return 'حدث خطأ أثناء إنشاء التقرير';
-  }
-}
-
-// ============================================
-// تقارير الجمعيات والذهب والسلف
-// ============================================
-
-/**
- * Generate associations (Jam3iya) report
- * @returns {string} Formatted report
- */
 function generateAssociationsReport() {
   try {
-    const sheet = getOrCreateSheet(SHEETS.ASSOCIATIONS);
-    const data = sheet.getDataRange().getValues();
+    var sheet = getOrCreateSheet(SHEETS.ASSOCIATIONS);
+    var data = sheet.getDataRange().getValues();
+    var transSheet = getOrCreateSheet(SHEETS.TRANSACTIONS);
+    var transData = transSheet.getDataRange().getValues();
 
-    const transSheet = getOrCreateSheet(SHEETS.TRANSACTIONS);
-    const transData = transSheet.getDataRange().getValues();
+    var r = '🔄 *تقرير الجمعيات*\n';
+    r += '━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
 
-    let report = `🔄 *تقرير الجمعيات*\n`;
-    report += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    var hasActive = false;
+    var totalMonthly = emptyBalance();
 
-    let hasActiveAssociations = false;
+    for (var i = 1; i < data.length; i++) {
+      if (data[i][8] !== 'نشط' && data[i][8] !== 'active') continue;
+      hasActive = true;
 
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][8] === 'نشط' || data[i][8] === 'active') {
-        hasActiveAssociations = true;
-        const name = data[i][1];
-        const monthlyAmount = data[i][2];
-        const totalMonths = data[i][3];
-        const startDate = data[i][4];
-        const receiveOrder = data[i][5];
-        const expectedReceiveDate = data[i][6];
+      var name = data[i][1];
+      var monthlyAmount = parseFloat(data[i][2]) || 0;
+      var totalMonths = parseInt(data[i][3]) || 12;
+      var startDate = data[i][4];
+      var receiveOrder = data[i][5];
+      var expectedReceiveDate = data[i][6];
+      var assocCurrency = normalizeCurrency(data[i][9]) || 'EGP';
 
-        // Count paid installments from transactions
-        let paidCount = 0;
-        for (let j = 1; j < transData.length; j++) {
-          const item = transData[j][5];
-          const description = transData[j][13];
-          if ((item && item.includes('جمعية') && item.includes(name)) ||
-              (description && description.includes(name))) {
-            paidCount++;
-          }
+      // عد الأقساط المدفوعة من الحركات
+      var paidCount = 0;
+      for (var j = 1; j < transData.length; j++) {
+        var tItem = transData[j][5] || '';
+        var tDesc = transData[j][13] || '';
+        var tCat = transData[j][4] || '';
+        if ((tItem.indexOf('جمعية') !== -1 || tCat === 'جمعية') &&
+            (tItem.indexOf(name) !== -1 || tDesc.indexOf(name) !== -1)) {
+          paidCount++;
         }
-
-        report += `📌 *${name}*\n`;
-        report += `   💵 القسط: ${formatNumber(monthlyAmount)} ج.م\n`;
-        report += `   📅 المدة: ${totalMonths} شهر\n`;
-        report += `   ✅ المدفوع: ${paidCount}/${totalMonths} قسط\n`;
-        report += `   🎯 ترتيب القبض: ${receiveOrder}\n`;
-        if (expectedReceiveDate) {
-          report += `   📆 موعد القبض: ${expectedReceiveDate}\n`;
-        }
-        report += `\n`;
       }
+
+      var remainingCount = totalMonths - paidCount;
+      var paidTotal = paidCount * monthlyAmount;
+      var totalAmount = totalMonths * monthlyAmount;
+      var remainingAmount = remainingCount * monthlyAmount;
+
+      r += '📌 *' + name + '*\n';
+      r += '   💵 القسط: ' + formatNumber(monthlyAmount) + ' ' + getCurrencySymbol(assocCurrency) + '/شهر\n';
+      r += '   📅 المدة: ' + totalMonths + ' شهر\n';
+      r += '   ✅ مدفوع: ' + paidCount + '/' + totalMonths + ' قسط';
+      r += ' (' + formatNumber(paidTotal) + ' ' + getCurrencySymbol(assocCurrency) + ')\n';
+      r += '   ⏳ متبقي: ' + remainingCount + ' قسط';
+      r += ' (' + formatNumber(remainingAmount) + ' ' + getCurrencySymbol(assocCurrency) + ')\n';
+      r += '   🎯 ترتيب القبض: ' + receiveOrder + '\n';
+      if (expectedReceiveDate) {
+        r += '   📆 موعد القبض المتوقع: ' + expectedReceiveDate + '\n';
+      }
+      r += '   💰 إجمالي الجمعية: ' + formatNumber(totalAmount) + ' ' + getCurrencySymbol(assocCurrency) + '\n';
+      r += '\n';
+
+      totalMonthly[assocCurrency] = (totalMonthly[assocCurrency] || 0) + monthlyAmount;
     }
 
-    if (!hasActiveAssociations) {
-      report += `لا توجد جمعيات نشطة حالياً\n`;
+    if (!hasActive) {
+      r += 'لا توجد جمعيات نشطة حالياً\n';
+    } else {
+      r += '━━━━━━━━━━━━━━━━━━━━━━━━\n';
+      r += '💵 *إجمالي الأقساط الشهرية:* ' + formatMultiCurrency(totalMonthly) + '\n';
     }
 
-    return report;
+    return r;
 
   } catch (error) {
-    Logger.log('Error generating associations report: ' + error.toString());
-    return 'حدث خطأ أثناء إنشاء التقرير';
+    Logger.log('Error in generateAssociationsReport: ' + error.toString());
+    return '❌ حدث خطأ: ' + error.message;
   }
 }
 
-/**
- * Generate gold report
- * @returns {string} Formatted report
- */
+// ============================================
+// 4. تقرير الذهب
+// ============================================
+
 function generateGoldReport() {
   try {
-    const sheet = getOrCreateSheet(SHEETS.GOLD);
-    const data = sheet.getDataRange().getValues();
+    var sheet = getOrCreateSheet(SHEETS.GOLD);
+    var data = sheet.getDataRange().getValues();
 
-    let totalWeight = 0;
-    let totalValue = 0;
-    const purchases = [];
+    var totalWeight = 0;
+    var totalValue = emptyBalance();
+    var purchases = [];
 
-    for (let i = 1; i < data.length; i++) {
-      const weight = parseFloat(data[i][2]) || 0;
-      const karat = data[i][3];
-      const price = parseFloat(data[i][4]) || 0;
-      const date = data[i][1];
-      const buyer = data[i][6];
+    for (var i = 1; i < data.length; i++) {
+      var weight = parseFloat(data[i][2]) || 0;
+      var karat = data[i][3] || '';
+      var price = parseFloat(data[i][4]) || 0;
+      var priceCurrency = normalizeCurrency(data[i][5]) || 'EGP';
+      var date = data[i][1];
+      var buyer = data[i][6] || '';
+      var itemType = data[i][7] || '';
 
       totalWeight += weight;
-      totalValue += price;
+      totalValue[priceCurrency] = (totalValue[priceCurrency] || 0) + price;
 
       purchases.push({
-        date: date,
-        weight: weight,
-        karat: karat,
-        price: price,
-        buyer: buyer
+        date: date, weight: weight, karat: karat,
+        price: price, currency: priceCurrency,
+        buyer: buyer, type: itemType
       });
     }
 
-    let report = `💍 *تقرير الذهب*\n`;
-    report += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    var r = '💍 *تقرير الذهب*\n';
+    r += '━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
 
-    report += `⚖️ *إجمالي الوزن:* ${totalWeight.toFixed(2)} جرام\n`;
-    report += `💰 *إجمالي القيمة:* ${formatNumber(totalValue)} ج.م\n\n`;
+    r += '⚖️ *إجمالي الوزن:* ' + totalWeight.toFixed(2) + ' جرام\n';
+    r += '💰 *إجمالي القيمة:* ' + formatMultiCurrency(totalValue) + '\n\n';
 
     if (purchases.length > 0) {
-      report += `📋 *المشتريات:*\n`;
-      purchases.forEach(p => {
-        const dateStr = p.date ? Utilities.formatDate(new Date(p.date), 'Asia/Riyadh', 'dd/MM/yyyy') : '';
-        report += `   ${dateStr} - ${p.weight}g عيار ${p.karat} - ${formatNumber(p.price)} ج.م`;
-        if (p.buyer) report += ` (${p.buyer})`;
-        report += `\n`;
-      });
+      r += '📋 *المقتنيات:*\n';
+      for (var pi = 0; pi < purchases.length; pi++) {
+        var p = purchases[pi];
+        var dateStr = '';
+        try {
+          dateStr = p.date ? Utilities.formatDate(new Date(p.date), 'Asia/Riyadh', 'dd/MM/yyyy') : '';
+        } catch (e) { dateStr = ''; }
+
+        r += '   ' + (dateStr ? dateStr + ' - ' : '');
+        if (p.type) r += p.type + ' ';
+        r += p.weight + 'g';
+        if (p.karat) r += ' عيار ' + p.karat;
+        r += ' - ' + formatNumber(p.price) + ' ' + getCurrencySymbol(p.currency);
+        if (p.buyer) r += ' (' + p.buyer + ')';
+        r += '\n';
+      }
+    } else {
+      r += 'لا توجد مقتنيات ذهبية مسجلة\n';
     }
 
-    return report;
+    return r;
 
   } catch (error) {
-    Logger.log('Error generating gold report: ' + error.toString());
-    return 'حدث خطأ أثناء إنشاء التقرير';
+    Logger.log('Error in generateGoldReport: ' + error.toString());
+    return '❌ حدث خطأ: ' + error.message;
   }
 }
 
-/**
- * Generate savings report (now uses account-based system)
- * @returns {string} Formatted report
- */
+// ============================================
+// 5. تقرير المدخرات
+// ============================================
+
 function generateSavingsReport() {
   try {
-    const accounts = getAllAccounts();
-    const savingsAccounts = accounts.filter(acc => acc.type === 'ادخار');
+    var accounts = getAllAccounts();
+    var savingsAccounts = accounts.filter(function(acc) { return acc.type === 'ادخار'; });
 
-    let report = `🏦 *تقرير المدخرات*\n`;
-    report += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    var r = '🏦 *تقرير المدخرات*\n';
+    r += '━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
 
-    let totalSAR = 0;
-    let totalEGP = 0;
+    var totalAll = emptyBalance();
 
-    savingsAccounts.forEach(account => {
-      const balance = calculateAccountBalance(account.code);
-      const hasSavings = balance.SAR !== 0 || balance.EGP !== 0;
+    for (var i = 0; i < savingsAccounts.length; i++) {
+      var acc = savingsAccounts[i];
+      var balance = calculateAccountBalance(acc.code);
+      var hasBalance = false;
+      for (var c in balance) { if (balance[c] && Math.abs(balance[c]) > 0.01) hasBalance = true; }
 
-      if (hasSavings) {
-        report += `💎 *${account.name}*\n`;
-        if (balance.SAR !== 0) {
-          report += `   ${formatNumber(balance.SAR)} ر.س\n`;
-          totalSAR += balance.SAR;
-        }
-        if (balance.EGP !== 0) {
-          report += `   ${formatNumber(balance.EGP)} ج.م\n`;
-          totalEGP += balance.EGP;
-        }
-        report += `\n`;
+      if (hasBalance) {
+        r += '💎 *' + acc.name + '*\n';
+        r += '   ' + formatMultiCurrency(balance) + '\n\n';
+        totalAll = addBalances(totalAll, balance);
       }
-    });
-
-    // Add gold as part of savings if exists
-    const goldSheet = getOrCreateSheet(SHEETS.GOLD);
-    const goldData = goldSheet.getDataRange().getValues();
-    let goldValue = 0;
-
-    for (let i = 1; i < goldData.length; i++) {
-      goldValue += parseFloat(goldData[i][4]) || 0;
     }
 
-    if (goldValue > 0) {
-      report += `💍 *الذهب:* ${formatNumber(goldValue)} ج.م\n\n`;
-      totalEGP += goldValue;
-    }
+    // الذهب كجزء من المدخرات
+    try {
+      var goldSheet = getOrCreateSheet(SHEETS.GOLD);
+      var goldData = goldSheet.getDataRange().getValues();
+      var goldTotal = emptyBalance();
+      var goldWeight = 0;
 
-    report += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    report += `📊 *إجمالي المدخرات:*\n`;
-    if (totalSAR !== 0) report += `   ${formatNumber(totalSAR)} ر.س\n`;
-    if (totalEGP !== 0) report += `   ${formatNumber(totalEGP)} ج.م`;
+      for (var gi = 1; gi < goldData.length; gi++) {
+        goldWeight += parseFloat(goldData[gi][2]) || 0;
+        var gPrice = parseFloat(goldData[gi][4]) || 0;
+        var gCur = normalizeCurrency(goldData[gi][5]) || 'EGP';
+        goldTotal[gCur] = (goldTotal[gCur] || 0) + gPrice;
+      }
 
-    return report;
+      if (goldWeight > 0) {
+        r += '💍 *الذهب:* ' + goldWeight.toFixed(2) + ' جرام (' + formatMultiCurrency(goldTotal) + ')\n\n';
+        totalAll = addBalances(totalAll, goldTotal);
+      }
+    } catch (e) {}
+
+    r += '━━━━━━━━━━━━━━━━━━━━━━━━\n';
+    r += '📊 *إجمالي المدخرات:* ' + formatMultiCurrency(totalAll) + '\n';
+
+    return r;
 
   } catch (error) {
-    Logger.log('Error generating savings report: ' + error.toString());
-    return 'حدث خطأ أثناء إنشاء التقرير';
+    Logger.log('Error in generateSavingsReport: ' + error.toString());
+    return '❌ حدث خطأ: ' + error.message;
   }
 }
 
-/**
- * Generate loans report
- * @returns {string} Formatted report
- */
+// ============================================
+// 6. تقرير السلف
+// ============================================
+
 function generateLoansReport() {
   try {
-    const sheet = getOrCreateSheet(SHEETS.LOANS);
-    const data = sheet.getDataRange().getValues();
+    var sheet = getOrCreateSheet(SHEETS.LOANS);
+    var data = sheet.getDataRange().getValues();
 
-    let totalOwed = 0;      // ما عليه من سلف
-    let totalOwing = 0;     // ما له عند الآخرين
-    const activeLoans = [];
+    var totalOwed = emptyBalance();
+    var totalOwing = emptyBalance();
+    var activeLoans = [];
 
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][7] === 'نشط' || data[i][7] === 'active') {
-        const type = data[i][2];
-        const person = data[i][3];
-        const remaining = parseFloat(data[i][6]) || 0;
-        const currency = data[i][5];
+    for (var i = 1; i < data.length; i++) {
+      if (data[i][7] !== 'نشط' && data[i][7] !== 'active') continue;
 
-        if (type === 'أخذ_سلفة' || type === 'loan_taken') {
-          totalOwed += remaining;
-        } else {
-          totalOwing += remaining;
-        }
+      var type = data[i][2];
+      var person = data[i][3];
+      var remaining = parseFloat(data[i][6]) || 0;
+      var currency = normalizeCurrency(data[i][5]) || 'SAR';
 
-        activeLoans.push({
-          type: type,
-          person: person,
-          remaining: remaining,
-          currency: currency
-        });
+      if (type === 'أخذ_سلفة' || type === 'loan_taken') {
+        totalOwed[currency] = (totalOwed[currency] || 0) + remaining;
+      } else {
+        totalOwing[currency] = (totalOwing[currency] || 0) + remaining;
       }
+
+      activeLoans.push({
+        type: type, person: person,
+        remaining: remaining, currency: currency
+      });
     }
 
-    let report = `💳 *تقرير السلف*\n`;
-    report += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    var r = '💳 *تقرير السلف*\n';
+    r += '━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
 
-    report += `📥 *عليك:* ${formatNumber(totalOwed)} ر.س\n`;
-    report += `📤 *لك:* ${formatNumber(totalOwing)} ر.س\n\n`;
+    r += '📤 *لك عند الناس:* ' + formatMultiCurrency(totalOwing) + '\n';
+    r += '📥 *عليك:* ' + formatMultiCurrency(totalOwed) + '\n\n';
 
     if (activeLoans.length > 0) {
-      report += `📋 *السلف النشطة:*\n`;
-      activeLoans.forEach(loan => {
-        const direction = loan.type.includes('أخذ') ? '⬇️' : '⬆️';
-        report += `   ${direction} ${loan.person}: ${formatNumber(loan.remaining)} ${loan.currency === 'SAR' ? 'ر.س' : 'ج.م'}\n`;
-      });
+      r += '📋 *السلف النشطة:*\n';
+      for (var li = 0; li < activeLoans.length; li++) {
+        var loan = activeLoans[li];
+        var direction = loan.type.indexOf('أخذ') !== -1 ? '⬇️' : '⬆️';
+        r += '   ' + direction + ' ' + loan.person + ': ' +
+             formatNumber(loan.remaining) + ' ' + getCurrencySymbol(loan.currency) + '\n';
+      }
     } else {
-      report += `لا توجد سلف نشطة حالياً\n`;
+      r += 'لا توجد سلف نشطة حالياً\n';
     }
 
-    return report;
+    return r;
 
   } catch (error) {
-    Logger.log('Error generating loans report: ' + error.toString());
-    return 'حدث خطأ أثناء إنشاء التقرير';
+    Logger.log('Error in generateLoansReport: ' + error.toString());
+    return '❌ حدث خطأ: ' + error.message;
   }
 }
 
 // ============================================
-// تقارير الاستثمارات
+// 7. تصدير PDF عبر Google Sheets
 // ============================================
 
-/**
- * Generate investments report
- * تقرير الاستثمارات
- * @returns {string} Formatted report
- */
+function exportReportAsPDF(reportText, reportTitle) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    // إنشاء شيت مؤقت
+    var tempSheet = ss.insertSheet('_PDF_TEMP_' + new Date().getTime());
+
+    // تنظيف النص من Markdown
+    var cleanText = reportText
+      .replace(/\*/g, '')
+      .replace(/━/g, '─');
+
+    // تقسيم النص إلى أسطر
+    var lines = cleanText.split('\n');
+
+    // كتابة كل سطر في خلية
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].replace(/^\s+/, '');
+      tempSheet.getRange(i + 1, 1).setValue(line);
+    }
+
+    // تنسيق
+    tempSheet.setColumnWidth(1, 500);
+    tempSheet.getRange(1, 1).setFontSize(14).setFontWeight('bold');
+
+    // تحويل إلى PDF
+    SpreadsheetApp.flush();
+
+    var ssId = ss.getId();
+    var sheetId = tempSheet.getSheetId();
+
+    var pdfUrl = 'https://docs.google.com/spreadsheets/d/' + ssId +
+      '/export?format=pdf' +
+      '&gid=' + sheetId +
+      '&size=A4' +
+      '&portrait=true' +
+      '&fitw=true' +
+      '&gridlines=false' +
+      '&printtitle=false' +
+      '&sheetnames=false' +
+      '&pagenum=false' +
+      '&fzr=false';
+
+    var token = ScriptApp.getOAuthToken();
+    var response = UrlFetchApp.fetch(pdfUrl, {
+      headers: { 'Authorization': 'Bearer ' + token },
+      muteHttpExceptions: true
+    });
+
+    // حذف الشيت المؤقت
+    ss.deleteSheet(tempSheet);
+
+    if (response.getResponseCode() === 200) {
+      return {
+        success: true,
+        blob: response.getBlob().setName(reportTitle + '.pdf')
+      };
+    } else {
+      Logger.log('PDF export failed: ' + response.getResponseCode());
+      return { success: false, error: 'فشل تصدير PDF' };
+    }
+
+  } catch (error) {
+    Logger.log('Error in exportReportAsPDF: ' + error.toString());
+    // حذف الشيت المؤقت في حالة الخطأ
+    try {
+      var sheets = SpreadsheetApp.getActiveSpreadsheet().getSheets();
+      for (var s = 0; s < sheets.length; s++) {
+        if (sheets[s].getName().indexOf('_PDF_TEMP_') === 0) {
+          SpreadsheetApp.getActiveSpreadsheet().deleteSheet(sheets[s]);
+        }
+      }
+    } catch (e) {}
+    return { success: false, error: error.message };
+  }
+}
+
+// ============================================
+// دوال مساعدة للتوافق مع الكود القديم
+// ============================================
+
+function generateWifeReport(month, year) {
+  return generateAccountStatement('WIFE', month, year);
+}
+
+function generateSiblingsReport(month, year) {
+  try {
+    var accounts = getAllAccounts();
+    var siblings = accounts.filter(function(a) {
+      return a.type === 'عهدة' && a.code !== 'WIFE';
+    });
+
+    var monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+                      'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+    var currentDate = new Date();
+    month = month || currentDate.getMonth() + 1;
+    year = year || currentDate.getFullYear();
+
+    var r = '👨‍👩‍👧‍👦 *تقرير الإخوة - ' + monthNames[month - 1] + ' ' + year + '*\n';
+    r += '━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
+
+    for (var i = 0; i < siblings.length; i++) {
+      var acc = siblings[i];
+      var balance = calculateAccountBalance(acc.code);
+      r += '👤 *' + acc.responsible + ':*\n';
+      r += '   💰 الرصيد: ' + formatMultiCurrency(balance) + '\n\n';
+    }
+
+    return r;
+
+  } catch (error) {
+    Logger.log('Error in generateSiblingsReport: ' + error.toString());
+    return '❌ حدث خطأ: ' + error.message;
+  }
+}
+
+function generateBalancesReport() {
+  try {
+    var accounts = getAllAccounts();
+    var r = '💰 *تقرير أرصدة الحسابات*\n';
+    r += '━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
+
+    var types = ['رئيسي', 'عهدة', 'ادخار', 'استثمار'];
+    var typeNames = { 'رئيسي': '🏦 الحسابات الرئيسية', 'عهدة': '💼 حسابات العهدة', 'ادخار': '💎 المدخرات', 'استثمار': '📈 الاستثمارات' };
+
+    for (var ti = 0; ti < types.length; ti++) {
+      var type = types[ti];
+      var typeAccounts = accounts.filter(function(a) { return a.type === type && a.affectsBalance; });
+      if (typeAccounts.length === 0) continue;
+
+      r += '*' + typeNames[type] + ':*\n';
+      for (var ai = 0; ai < typeAccounts.length; ai++) {
+        var acc = typeAccounts[ai];
+        var balance = calculateAccountBalance(acc.code);
+        var hasBal = false;
+        for (var c in balance) { if (balance[c] && Math.abs(balance[c]) > 0.01) hasBal = true; }
+        if (hasBal) {
+          r += '   • ' + acc.name + ': ' + formatMultiCurrency(balance) + '\n';
+        }
+      }
+      r += '\n';
+    }
+
+    return r;
+  } catch (error) {
+    Logger.log('Error in generateBalancesReport: ' + error.toString());
+    return '❌ حدث خطأ: ' + error.message;
+  }
+}
+
+function generateCustodyReport() {
+  try {
+    var accounts = getAllAccounts();
+    var custodyAccounts = accounts.filter(function(a) { return a.type === 'عهدة'; });
+
+    var r = '💼 *تقرير العهد*\n';
+    r += '━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
+
+    var total = emptyBalance();
+
+    for (var i = 0; i < custodyAccounts.length; i++) {
+      var acc = custodyAccounts[i];
+      var balance = calculateAccountBalance(acc.code);
+      r += '👤 *' + acc.responsible + ':*\n';
+      r += '   ' + formatMultiCurrency(balance) + '\n\n';
+      total = addBalances(total, balance);
+    }
+
+    r += '━━━━━━━━━━━━━━━━━━━━━━━━\n';
+    r += '💰 *إجمالي العهد:* ' + formatMultiCurrency(total) + '\n';
+
+    return r;
+  } catch (error) {
+    Logger.log('Error in generateCustodyReport: ' + error.toString());
+    return '❌ حدث خطأ: ' + error.message;
+  }
+}
+
+function generateComprehensiveReport() {
+  return generateUnifiedReport();
+}
+
 function generateInvestmentsReport() {
   try {
-    const accounts = getAllAccounts();
-    const investmentAccounts = accounts.filter(acc => acc.type === 'استثمار');
+    var accounts = getAllAccounts();
+    var investAccounts = accounts.filter(function(acc) { return acc.type === 'استثمار'; });
 
-    let report = `📈 *تقرير الاستثمارات*\n`;
-    report += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    var r = '📈 *تقرير الاستثمارات*\n';
+    r += '━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
 
-    let totalSAR = 0;
-    let totalEGP = 0;
+    var total = emptyBalance();
 
-    investmentAccounts.forEach(account => {
-      const balance = calculateAccountBalance(account.code);
-
-      report += `📊 *${account.name}*\n`;
-      if (balance.SAR !== 0) {
-        report += `   ${formatNumber(balance.SAR)} ر.س\n`;
-        totalSAR += balance.SAR;
-      }
-      if (balance.EGP !== 0) {
-        report += `   ${formatNumber(balance.EGP)} ج.م\n`;
-        totalEGP += balance.EGP;
-      }
-      report += `\n`;
-    });
-
-    if (investmentAccounts.length === 0) {
-      report += `لا توجد حسابات استثمارية\n\n`;
+    for (var i = 0; i < investAccounts.length; i++) {
+      var acc = investAccounts[i];
+      var balance = calculateAccountBalance(acc.code);
+      r += '📊 *' + acc.name + ':*\n';
+      r += '   ' + formatMultiCurrency(balance) + '\n\n';
+      total = addBalances(total, balance);
     }
 
-    report += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    report += `📊 *إجمالي الاستثمارات:*\n`;
-    if (totalSAR !== 0) report += `   ${formatNumber(totalSAR)} ر.س\n`;
-    if (totalEGP !== 0) report += `   ${formatNumber(totalEGP)} ج.م`;
+    if (investAccounts.length === 0) {
+      r += 'لا توجد حسابات استثمارية\n\n';
+    }
 
-    return report;
+    r += '━━━━━━━━━━━━━━━━━━━━━━━━\n';
+    r += '📊 *إجمالي الاستثمارات:* ' + formatMultiCurrency(total) + '\n';
 
+    return r;
   } catch (error) {
-    Logger.log('Error generating investments report: ' + error.toString());
-    return 'حدث خطأ أثناء إنشاء التقرير';
-  }
-}
-
-// ============================================
-// تقرير شامل
-// ============================================
-
-/**
- * Generate comprehensive report
- * التقرير الشامل
- * @returns {string} Formatted report
- */
-function generateComprehensiveReport() {
-  try {
-    const accounts = getAllAccounts();
-
-    let report = `📊 *التقرير المالي الشامل*\n`;
-    report += `📅 ${Utilities.formatDate(new Date(), 'Asia/Riyadh', 'dd/MM/yyyy')}\n`;
-    report += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
-
-    // Main accounts
-    const mainAccounts = accounts.filter(acc => acc.type === 'رئيسي');
-    let mainTotalSAR = 0;
-    let mainTotalEGP = 0;
-
-    report += `🏦 *الحسابات الرئيسية:*\n`;
-    mainAccounts.forEach(acc => {
-      const balance = calculateAccountBalance(acc.code);
-      if (balance.SAR !== 0 || balance.EGP !== 0) {
-        report += `   ${acc.name}:\n`;
-        if (balance.SAR) { report += `      ${formatNumber(balance.SAR)} ر.س\n`; mainTotalSAR += balance.SAR; }
-        if (balance.EGP) { report += `      ${formatNumber(balance.EGP)} ج.م\n`; mainTotalEGP += balance.EGP; }
-      }
-    });
-    report += `\n`;
-
-    // Custody accounts
-    const custodyAccounts = accounts.filter(acc => acc.type === 'عهدة');
-    let custodyTotalEGP = 0;
-
-    report += `👤 *حسابات العهدة:*\n`;
-    custodyAccounts.forEach(acc => {
-      const balance = calculateAccountBalance(acc.code);
-      if (balance.EGP !== 0) {
-        report += `   ${acc.name}: ${formatNumber(balance.EGP)} ج.م\n`;
-        custodyTotalEGP += balance.EGP;
-      }
-    });
-    report += `\n`;
-
-    // Savings accounts
-    const savingsAccounts = accounts.filter(acc => acc.type === 'ادخار');
-    let savingsTotalEGP = 0;
-
-    report += `💎 *المدخرات:*\n`;
-    savingsAccounts.forEach(acc => {
-      const balance = calculateAccountBalance(acc.code);
-      if (balance.EGP !== 0) {
-        report += `   ${acc.name}: ${formatNumber(balance.EGP)} ج.م\n`;
-        savingsTotalEGP += balance.EGP;
-      }
-    });
-    report += `\n`;
-
-    // Summary
-    report += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    report += `📈 *الملخص:*\n`;
-    report += `   💰 الرصيد الرئيسي: ${formatNumber(mainTotalSAR)} ر.س / ${formatNumber(mainTotalEGP)} ج.م\n`;
-    report += `   👤 إجمالي العهد: ${formatNumber(custodyTotalEGP)} ج.م\n`;
-    report += `   💎 إجمالي المدخرات: ${formatNumber(savingsTotalEGP)} ج.م\n`;
-
-    return report;
-
-  } catch (error) {
-    Logger.log('Error generating comprehensive report: ' + error.toString());
-    return 'حدث خطأ أثناء إنشاء التقرير';
+    Logger.log('Error in generateInvestmentsReport: ' + error.toString());
+    return '❌ حدث خطأ: ' + error.message;
   }
 }
