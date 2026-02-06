@@ -818,6 +818,87 @@ function findItem(searchText) {
 }
 
 /**
+ * ⭐ مطابقة البند مع قاعدة البيانات
+ * يبحث عن أقرب بند صالح بناءً على الطبيعة والتصنيف والبند والحسابات
+ * يُرجع {category, item} من قاعدة البيانات أو القيم الأصلية إذا لم يجد تطابق
+ */
+function resolveTransactionItem(nature, category, item, fromAccount, toAccount) {
+  try {
+    var items = getAllItems();
+    if (!items || items.length === 0) return { category: category, item: item };
+
+    var normalizedCategory = normalizeArabic(category || '');
+    var normalizedItem = normalizeArabic(item || '');
+
+    // ⭐ 1. تطابق مباشر: نفس الطبيعة + نفس التصنيف + نفس البند
+    var exactMatch = items.find(function(i) {
+      return i.nature === nature &&
+             normalizeArabic(i.category) === normalizedCategory &&
+             normalizeArabic(i.item) === normalizedItem;
+    });
+    if (exactMatch) return { category: exactMatch.category, item: exactMatch.item };
+
+    // ⭐ 2. تطابق بالطبيعة والبند فقط
+    var itemMatch = items.find(function(i) {
+      return i.nature === nature && normalizeArabic(i.item) === normalizedItem;
+    });
+    if (itemMatch) return { category: itemMatch.category, item: itemMatch.item };
+
+    // ⭐ 3. تطابق جزئي بالبند (يحتوي)
+    var partialItemMatch = items.find(function(i) {
+      return i.nature === nature && (
+        normalizeArabic(i.item).indexOf(normalizedItem) !== -1 ||
+        normalizedItem.indexOf(normalizeArabic(i.item)) !== -1
+      );
+    });
+    if (partialItemMatch) return { category: partialItemMatch.category, item: partialItemMatch.item };
+
+    // ⭐ 4. تطابق بالطبيعة والتصنيف فقط (أول بند في نفس التصنيف)
+    var categoryMatch = items.find(function(i) {
+      return i.nature === nature && normalizeArabic(i.category) === normalizedCategory;
+    });
+    if (categoryMatch) return { category: categoryMatch.category, item: categoryMatch.item };
+
+    // ⭐ 5. تطابق ذكي بالحسابات (للتحويلات)
+    if (nature === 'تحويل' && fromAccount && toAccount) {
+      var accountMatch = items.find(function(i) {
+        return i.nature === 'تحويل' &&
+               i.defaultAccount &&
+               i.defaultAccount.indexOf(fromAccount) !== -1 &&
+               i.defaultAccount.indexOf(toAccount) !== -1;
+      });
+      if (accountMatch) return { category: accountMatch.category, item: accountMatch.item };
+
+      // تطابق بحساب الوجهة فقط
+      var toAccountMatch = items.find(function(i) {
+        return i.nature === 'تحويل' &&
+               i.defaultAccount &&
+               i.defaultAccount.indexOf(toAccount) !== -1;
+      });
+      if (toAccountMatch) return { category: toAccountMatch.category, item: toAccountMatch.item };
+    }
+
+    // ⭐ 6. تطابق بحساب المصدر للمصروفات من العهدة
+    if (nature === 'مصروف' && fromAccount && fromAccount !== 'MAIN') {
+      var custodyExpenseMatch = items.find(function(i) {
+        return i.nature === 'مصروف' &&
+               i.category === 'صرف_عهدة' &&
+               i.defaultAccount === fromAccount;
+      });
+      if (custodyExpenseMatch) return { category: custodyExpenseMatch.category, item: custodyExpenseMatch.item };
+    }
+
+    Logger.log('⚠️ resolveTransactionItem: no match found for nature=' + nature +
+               ', category=' + category + ', item=' + item);
+    return { category: category || '', item: item || '' };
+
+  } catch (error) {
+    Logger.log('Error in resolveTransactionItem: ' + error.toString());
+    return { category: category || '', item: item || '' };
+  }
+}
+
+/**
  * الحصول على البنود للذكاء الاصطناعي
  */
 function getItemsForAI() {
@@ -1052,6 +1133,21 @@ function addTransaction(transData) {
           }
           break;
       }
+    }
+
+    // ⭐⭐⭐ مطابقة التصنيف والبند مع قاعدة البيانات ⭐⭐⭐
+    var resolved = resolveTransactionItem(
+      newFormat.nature,
+      newFormat.category,
+      newFormat.item,
+      newFormat.fromAccount,
+      newFormat.toAccount
+    );
+    if (resolved.category !== newFormat.category || resolved.item !== newFormat.item) {
+      Logger.log('Item resolved: category "' + newFormat.category + '" → "' + resolved.category +
+                 '", item "' + newFormat.item + '" → "' + resolved.item + '"');
+      newFormat.category = resolved.category;
+      newFormat.item = resolved.item;
     }
 
     // معلومات المستخدم

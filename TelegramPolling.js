@@ -1492,12 +1492,16 @@ function processUserMessage(chatId, text, user) {
         // تحويل المفاتيح العربية للحفظ
         var transData = {
           type: trans.نوع || trans.type,
+          nature: trans.طبيعة || trans.nature || '',
           amount: trans.مبلغ || trans.amount,
           currency: currency,
           category: trans.تصنيف || trans.category,
+          item: trans.بند || trans.item || '',
           contact: trans.جهة || trans.contact,
           contact_name: trans.اسم_الجهة || trans.contact_name,
           description: trans.وصف || trans.description,
+          fromAccount: trans.من_حساب || trans.fromAccount || trans.from_account || '',
+          toAccount: trans.إلى_حساب || trans.toAccount || trans.to_account || '',
           amount_received: trans.مبلغ_مستلم || trans.amount_received,
           currency_received: currencyReceived,
           exchange_rate: trans.سعر_الصرف || trans.exchange_rate,
