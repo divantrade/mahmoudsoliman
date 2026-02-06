@@ -141,17 +141,22 @@ function deleteAllSheets() {
   const sheets = ss.getSheets();
 
   // Google Sheets يتطلب وجود شيت واحد على الأقل
-  // لذلك ننشئ شيت مؤقت أولاً
-  const tempSheet = ss.insertSheet('_temp_setup_');
+  // نتحقق إذا كان الشيت المؤقت موجود، وإلا ننشئه
+  let tempSheet = ss.getSheetByName('_temp_setup_');
+  if (!tempSheet) {
+    tempSheet = ss.insertSheet('_temp_setup_');
+  }
 
   // حذف جميع الشيتات الأخرى
   sheets.forEach(sheet => {
-    try {
-      ss.deleteSheet(sheet);
-      Logger.log('   🗑️ تم حذف: ' + sheet.getName());
-    } catch (e) {
-      // تجاهل الأخطاء (قد يكون الشيت محمياً)
-      Logger.log('   ⚠️ تعذر حذف: ' + sheet.getName());
+    if (sheet.getName() !== '_temp_setup_') {
+      try {
+        ss.deleteSheet(sheet);
+        Logger.log('   🗑️ تم حذف: ' + sheet.getName());
+      } catch (e) {
+        // تجاهل الأخطاء (قد يكون الشيت محمياً)
+        Logger.log('   ⚠️ تعذر حذف: ' + sheet.getName());
+      }
     }
   });
 
