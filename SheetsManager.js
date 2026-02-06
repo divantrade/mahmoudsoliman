@@ -1558,8 +1558,20 @@ function parseAssociationMessage(text) {
     startYear: null       // سنة البداية
   };
 
-  var normalizedText = text.replace(/[\u064B-\u065F]/g, '').trim(); // إزالة التشكيل
+  // ⭐ تحويل الأرقام العربية للأرقام الغربية
+  var arabicToWestern = function(str) {
+    var arabicNumerals = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+    for (var i = 0; i < 10; i++) {
+      str = str.replace(new RegExp(arabicNumerals[i], 'g'), i.toString());
+    }
+    return str;
+  };
+
+  var normalizedText = arabicToWestern(text); // تحويل الأرقام العربية
+  normalizedText = normalizedText.replace(/[\u064B-\u065F]/g, '').trim(); // إزالة التشكيل
   normalizedText = normalizedText.replace(/\s+/g, ' '); // تنظيف المسافات
+
+  Logger.log('Normalized text: ' + normalizedText);
 
   // ═══════════════ استخراج اسم الجمعية ═══════════════
   // أنماط: "اسم الجمعية X" أو "جمعية X" أو "جمعيه X"
