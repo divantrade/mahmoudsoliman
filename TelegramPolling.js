@@ -1037,29 +1037,31 @@ function processSmartCustodyTransfer(chatId, text, user) {
     // ⭐ تحديد نوع المعاملة وبناء البيانات
     var transactions = [];
 
+    // ⭐ قاموس ربط أسماء أمناء العهد بأكواد الحسابات
+    var custodianAccountMap = {
+      'مصطفى': 'MOSTAFA', 'مصطفي': 'MOSTAFA',
+      'سارة': 'SARA', 'ساره': 'SARA',
+      'ام سيليا': 'WIFE', 'أم سيليا': 'WIFE', 'مراتي': 'WIFE', 'زوجتي': 'WIFE',
+      'هاجر': 'HAGAR', 'محمد': 'MOHAMED'
+    };
+
     if (destCustodian && destCustodian !== sourceCustodian) {
-      // ⭐ تحويل من عهدة لعهدة (معاملتان)
-      // 1. صرف من عهدة المصدر
+      // ⭐ تحويل من عهدة لعهدة (معاملة واحدة فقط - قيد مزدوج)
+      var sourceAccount = custodianAccountMap[sourceCustodian] || sourceCustodian;
+      var destAccount = custodianAccountMap[destCustodian] || destCustodian;
+
       transactions.push({
-        type: 'صرف_من_عهدة',
+        nature: 'تحويل',
+        type: 'تحويل',
+        category: 'عهدة',
+        item: 'تحويل بين عهد',
         amount: amount,
         currency: currency,
-        category: 'تحويل عهدة',
-        contact: sourceCustodian,
-        contact_name: sourceCustodian,
+        fromAccount: sourceAccount,
+        from_account: sourceAccount,
+        toAccount: destAccount,
+        to_account: destAccount,
         description: 'تحويل من عهدة ' + sourceCustodian + ' إلى عهدة ' + destCustodian,
-        user_name: user.name,
-        telegram_id: user.telegram_id
-      });
-      // 2. إيداع في عهدة الوجهة
-      transactions.push({
-        type: 'إيداع_عهدة',
-        amount: amount,
-        currency: currency,
-        category: 'عهدة ' + destCustodian,
-        contact: destCustodian,
-        contact_name: destCustodian,
-        description: 'إيداع من عهدة ' + sourceCustodian,
         user_name: user.name,
         telegram_id: user.telegram_id
       });
@@ -1249,52 +1251,15 @@ function processCompoundTransferDirectly(chatId, text, user) {
   Logger.log('Text: ' + text);
 
   try {
-    // استخدام دالة parseCompoundTransfer من SheetsManager
-    var parsedCompound = parseCompoundTransfer(text);
+    // استخدام دالة parseCompoundTransactionLocally من GeminiAI
+    var parsedCompound = parseCompoundTransactionLocally(text);
 
-    if (!parsedCompound || !parsedCompound.isCompound || !parsedCompound.transactions || parsedCompound.transactions.length === 0) {
+    if (!parsedCompound || !parsedCompound.success || !parsedCompound.transactions || parsedCompound.transactions.length === 0) {
       sendMessage(chatId, buildErrorWithExamples(text, 'compound'));
       return;
     }
 
     Logger.log('Parsed compound: ' + JSON.stringify(parsedCompound));
-
-    // بناء رسالة المعاينة
-    var previewMsg = '📋 *تحويل مركب - مراجعة قبل الحفظ*\n';
-    previewMsg += '━━━━━━━━━━━━━━━━━━━━━\n\n';
-
-    // المعلومات الرئيسية
-    previewMsg += '💰 *المبلغ الإجمالي:* ' + parsedCompound.totalAmountSAR + ' ريال\n';
-    previewMsg += '📥 *ما يعادل:* ' + parsedCompound.totalAmountEGP + ' جنيه\n';
-    previewMsg += '📊 *سعر الصرف:* ' + parsedCompound.exchangeRate + '\n';
-    previewMsg += '👤 *أمين العهدة:* ' + parsedCompound.custodian + '\n\n';
-
-    previewMsg += '━━━━━━━━━━━━━━━━━━━━━\n';
-    previewMsg += '*📝 المعاملات التي سيتم إنشاؤها:*\n\n';
-
-    // عرض كل معاملة
-    for (var i = 0; i < parsedCompound.transactions.length; i++) {
-      var t = parsedCompound.transactions[i];
-      var icon = t.type === 'إيداع_عهدة' ? '📥' : '📤';
-      var typeDisplay = t.type.replace(/_/g, ' ');
-
-      previewMsg += icon + ' *' + (i + 1) + '. ' + typeDisplay + '*\n';
-      previewMsg += '   المبلغ: ' + t.amount + ' ' + t.currency + '\n';
-
-      if (t.amount_received) {
-        previewMsg += '   المستلم: ' + t.amount_received + ' ' + t.currency_received + '\n';
-      }
-      if (t.contact) {
-        previewMsg += '   الجهة: ' + escapeMarkdown(t.contact) + '\n';
-      }
-      if (t.category) {
-        previewMsg += '   التصنيف: ' + escapeMarkdown(t.category) + '\n';
-      }
-      previewMsg += '\n';
-    }
-
-    previewMsg += '━━━━━━━━━━━━━━━━━━━━━\n';
-    previewMsg += '⚠️ *هل البيانات صحيحة؟*';
 
     // إضافة معلومات المستخدم لكل معاملة
     for (var j = 0; j < parsedCompound.transactions.length; j++) {
@@ -1302,27 +1267,8 @@ function processCompoundTransferDirectly(chatId, text, user) {
       parsedCompound.transactions[j].telegram_id = user.telegram_id;
     }
 
-    // حفظ البيانات في Cache
-    var compoundDataStr = JSON.stringify({
-      transactions: parsedCompound.transactions,
-      totalSAR: parsedCompound.totalAmountSAR,
-      totalEGP: parsedCompound.totalAmountEGP,
-      custodian: parsedCompound.custodian
-    });
-
-    var cacheKey = 'compound_' + chatId;
-    CacheService.getScriptCache().put(cacheKey, compoundDataStr, 300); // 5 دقائق
-
-    var keyboard = {
-      inline_keyboard: [
-        [
-          { text: '✅ تأكيد الكل', callback_data: 'confirm_compound_' + cacheKey },
-          { text: '❌ إلغاء', callback_data: 'cancel_' + cacheKey }
-        ]
-      ]
-    };
-
-    sendMessage(chatId, previewMsg, keyboard);
+    // استخدام نظام المعاينة الموحد
+    sendPreviewWithButtons(chatId, parsedCompound.transactions, user);
 
   } catch (error) {
     Logger.log('EXCEPTION in processCompoundTransferDirectly: ' + error.toString());
@@ -1375,11 +1321,21 @@ function processUserMessage(chatId, text, user) {
       /الباقي|المتبقي|يتبقي|يفضل|تفضل/.test(normalizedForSearch)
     );
 
-    hasCompoundKeyword = hasTransfer && hasCurrency && hasExchange && hasDistribution;
+    // ⭐ المسار الأصلي: حولت + ريال + يعادل + توزيع
+    var originalCompound = hasTransfer && hasCurrency && hasExchange && hasDistribution;
+
+    // ⭐ مسار جديد: "من شخص الي شخص" + توزيع (بدون اشتراط ريال/يعادل)
+    // يدعم: "من مصطفي الي مراتي" و "من مصطفي لمراتي" (ل ملتصقة)
+    var hasFromTo = /من\s+\S+\s+(?:الي|الى|إلى|ل|لـ)\s+\S+/i.test(normalizedForSearch) ||
+                    /من\s+\S+\s+ل\S+/i.test(normalizedForSearch);
+    var newCompound = hasFromTo && hasDistribution;
+
+    hasCompoundKeyword = originalCompound || newCompound;
 
     Logger.log('Detection: hasTransfer=' + hasTransfer + ', hasCurrency=' + hasCurrency +
-               ', hasExchange=' + hasExchange + ', hasDistribution=' + hasDistribution);
-    Logger.log('Has compound keyword: ' + hasCompoundKeyword);
+               ', hasExchange=' + hasExchange + ', hasDistribution=' + hasDistribution +
+               ', hasFromTo=' + hasFromTo);
+    Logger.log('Has compound keyword: ' + hasCompoundKeyword + ' (original=' + originalCompound + ', new=' + newCompound + ')');
 
     if (hasCompoundKeyword) {
       Logger.log('*** COMPOUND TRANSFER DETECTED - Processing directly ***');
@@ -1396,6 +1352,35 @@ function processUserMessage(chatId, text, user) {
     var smartCustodyPattern = /من\s*(مصطف[يى]|سار[ةه]|مرات[يه]|زوجت[يه]|ام\s*سيل[اي]|أم\s*سيل[اي]|اخت[يه]|اخو[يه]ا?)(?:\s+اخت[يه]|\s+اخو[يه]ا?)?/i.test(cleanText);
 
     if (smartCustodyPattern) {
+      // ⭐⭐⭐ فحص إذا كانت رسالة مركبة (تحويل + مصروفات فرعية) ⭐⭐⭐
+      var hasSubExpenses = (
+        /دفع[ت]?\s/i.test(normalizedForSearch) ||
+        /صرف[ت]?\s/i.test(normalizedForSearch) ||
+        /جمعي[ةه]/i.test(normalizedForSearch) ||
+        /منهم|منها/i.test(normalizedForSearch) ||
+        /والباقي|المتبقي/i.test(normalizedForSearch)
+      );
+
+      if (hasSubExpenses) {
+        Logger.log('*** SMART CUSTODY + COMPOUND DETECTED - Using local compound parser ***');
+        try {
+          var compoundResult = parseCompoundTransactionLocally(cleanText);
+          if (compoundResult && compoundResult.success && compoundResult.transactions && compoundResult.transactions.length > 0) {
+            // إضافة معلومات المستخدم لكل معاملة
+            for (var ci = 0; ci < compoundResult.transactions.length; ci++) {
+              compoundResult.transactions[ci].user_name = user.name;
+              compoundResult.transactions[ci].telegram_id = user.telegram_id;
+            }
+            sendPreviewWithButtons(chatId, compoundResult.transactions, user);
+            return;
+          }
+          // إذا فشل التحليل المركب، نكمل للتحويل البسيط
+          Logger.log('Compound parsing failed, falling back to simple smart custody');
+        } catch (compoundSmartError) {
+          Logger.log('❌ Error in compound smart custody: ' + compoundSmartError.toString());
+        }
+      }
+
       Logger.log('*** SMART CUSTODY PATTERN DETECTED ***');
       try {
         processSmartCustodyTransfer(chatId, cleanText, user);
