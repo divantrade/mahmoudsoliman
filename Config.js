@@ -262,6 +262,8 @@ const DEFAULT_ITEMS = [
   { nature: 'مصروف', category: 'معيشة', item: 'غاز', code: 'EXP-LIV-07', defaultAccount: 'MAIN', active: true },
   { nature: 'مصروف', category: 'معيشة', item: 'إنترنت', code: 'EXP-LIV-08', defaultAccount: 'MAIN', active: true },
   { nature: 'مصروف', category: 'معيشة', item: 'موبايل', code: 'EXP-LIV-09', defaultAccount: 'MAIN', active: true },
+  { nature: 'مصروف', category: 'معيشة', item: 'مصروفات منزلية', code: 'EXP-LIV-10', defaultAccount: '', active: true },
+  { nature: 'مصروف', category: 'معيشة', item: 'مصروفات عامة', code: 'EXP-LIV-11', defaultAccount: '', active: true },
 
   // ═══════════════════════════════════════════════════
   // مصروفات مواصلات
@@ -322,6 +324,7 @@ const DEFAULT_ITEMS = [
   { nature: 'تحويل', category: 'ادخار', item: 'تحويل للادخار', code: 'TRF-SAV-01', defaultAccount: 'MAIN→SAVINGS', active: true },
   { nature: 'تحويل', category: 'ادخار', item: 'تحويل لادخار الزوجة', code: 'TRF-SAV-02', defaultAccount: 'WIFE→WIFE_SAVINGS', active: true },
   { nature: 'تحويل', category: 'داخلي', item: 'تحويل بين حسابات', code: 'TRF-INT-01', defaultAccount: '', active: true },
+  { nature: 'تحويل', category: 'عهدة', item: 'تحويل بين عهد', code: 'TRF-CUC-01', defaultAccount: '', active: true },
   { nature: 'تحويل', category: 'صرافة', item: 'تحويل صرافة', code: 'TRF-EXC-01', defaultAccount: '', active: true },
 
   // ═══════════════════════════════════════════════════
