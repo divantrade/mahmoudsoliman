@@ -507,17 +507,26 @@ function generateAssociationsReport() {
     var hasActive = false;
     var totalMonthly = emptyBalance();
 
+    // أعمدة شيت الجمعيات:
+    // A:ID(0), B:الاسم(1), C:المسؤول(2), D:الحساب(3), E:قيمة_القسط(4),
+    // F:العملة(5), G:عدد_الأشهر(6), H:ترتيب_القبض(7), I:تاريخ_البداية(8),
+    // J:تاريخ_القبض_المتوقع(9), K:إجمالي_المدفوع(10), L:إجمالي_المفروض(11),
+    // M:الحالة(12), N:ملاحظات(13)
     for (var i = 1; i < data.length; i++) {
-      if (data[i][8] !== 'نشط' && data[i][8] !== 'active') continue;
+      if (!data[i][0]) continue; // تخطي صفوف فارغة
+      var status = (data[i][12] || '').toString().trim();
+      if (status !== 'نشطة' && status !== 'نشط' && status !== 'active') continue;
       hasActive = true;
 
-      var name = data[i][1];
-      var monthlyAmount = parseFloat(data[i][2]) || 0;
-      var totalMonths = parseInt(data[i][3]) || 12;
-      var startDate = data[i][4];
-      var receiveOrder = data[i][5];
-      var expectedReceiveDate = data[i][6];
-      var assocCurrency = normalizeCurrency(data[i][9]) || 'EGP';
+      var name = data[i][1] || '';
+      var responsible = data[i][2] || '';
+      var account = data[i][3] || '';
+      var monthlyAmount = parseFloat(data[i][4]) || 0;
+      var assocCurrency = normalizeCurrency(data[i][5]) || 'EGP';
+      var totalMonths = parseInt(data[i][6]) || 12;
+      var receiveOrder = data[i][7] || '';
+      var startDate = data[i][8] || '';
+      var expectedReceiveDate = data[i][9] || '';
 
       // عد الأقساط المدفوعة من الحركات
       var paidCount = 0;
