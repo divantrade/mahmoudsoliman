@@ -812,43 +812,29 @@ function handleMenuButton(chatId, text, user) {
 }
 
 /**
- * إرسال تقرير العهدة
+ * إرسال تقرير العهدة - يستخدم كشف الحساب التفصيلي
  */
 function sendCustodyReport(chatId, custodian) {
   Logger.log('=== sendCustodyReport ===');
   Logger.log('Requesting report for: ' + custodian);
 
-  var report = getCustodyReport(custodian);
+  try {
+    // تحويل اسم الأمين إلى كود الحساب
+    var nameToAccount = {
+      'سارة': 'SARA', 'ساره': 'SARA',
+      'مصطفى': 'MOSTAFA', 'مصطفي': 'MOSTAFA',
+      'ام سيليا': 'WIFE', 'مراتي': 'WIFE', 'الزوجة': 'WIFE',
+      'هاجر': 'HAGAR', 'محمد': 'MOHAMED'
+    };
 
-  if (!report) {
-    Logger.log('Report returned null!');
-    sendMessage(chatId, '❌ لا توجد بيانات للعهدة\n\nتأكد من تسجيل حركات عهدة أولاً.');
-    return;
+    var accountCode = nameToAccount[custodian] || custodian;
+    var pdfTitle = 'كشف_حساب_' + custodian;
+    var report = generateAccountStatement(accountCode);
+    sendReportWithPdfOption(chatId, report, pdfTitle);
+  } catch (error) {
+    Logger.log('Error in sendCustodyReport: ' + error.toString());
+    sendMessage(chatId, '❌ خطأ في تقرير العهدة: ' + error.message);
   }
-
-  Logger.log('Report data: deposits=' + report.total_deposits + ', expenses=' + report.total_expenses + ', transactions=' + (report.transactions ? report.transactions.length : 0));
-
-  var msg = '💼 *تقرير عهدة ' + custodian + '*\n';
-  msg += '━━━━━━━━━━━━━━━━━━━━━\n\n';
-
-  msg += '📥 *إجمالي الإيداعات:* ' + formatNumber(report.total_deposits) + ' جنيه\n';
-  msg += '📤 *إجمالي المصروفات:* ' + formatNumber(report.total_expenses) + ' جنيه\n';
-  msg += '━━━━━━━━━━━━━━━━━━━━━\n';
-  msg += '💰 *الرصيد الحالي:* ' + formatNumber(report.current_balance) + ' جنيه\n\n';
-
-  if (report.transactions && report.transactions.length > 0) {
-    msg += '*📋 آخر الحركات (' + report.transactions.length + '):*\n';
-    var lastTrans = report.transactions.slice(-5).reverse();
-    for (var i = 0; i < lastTrans.length; i++) {
-      var t = lastTrans[i];
-      var icon = t.type === 'إيداع_عهدة' ? '📥' : '📤';
-      msg += icon + ' ' + formatNumber(t.amount) + ' - ' + (t.category || t.type) + '\n';
-    }
-  } else {
-    msg += '📋 _لا توجد حركات مسجلة بعد_\n';
-  }
-
-  sendMessage(chatId, msg);
 }
 
 /**
