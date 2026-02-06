@@ -18,6 +18,172 @@ function convertArabicToWesternNumerals(str) {
 }
 
 /**
+ * ⭐⭐⭐ تحليل المعاملات المركبة محلياً بدون AI ⭐⭐⭐
+ * نمط: "من X الي Y مبلغ ... دفعت/صرفت Z ... والباقي ..."
+ */
+function parseCompoundTransactionLocally(message) {
+  Logger.log('=== parseCompoundTransactionLocally START ===');
+
+  // تحويل الأرقام العربية وتنظيف
+  var text = convertArabicToWesternNumerals(message);
+  text = text.replace(/[\u064B-\u065F]/g, ''); // إزالة التشكيل
+
+  Logger.log('Normalized: ' + text);
+
+  // قاموس الأسماء
+  var nameToAccount = {
+    'مصطفى': 'MOSTAFA', 'مصطفي': 'MOSTAFA', 'مصطفا': 'MOSTAFA',
+    'سارة': 'SARA', 'ساره': 'SARA', 'سارا': 'SARA',
+    'مراتي': 'WIFE', 'زوجتي': 'WIFE', 'الزوجة': 'WIFE', 'الزوجه': 'WIFE',
+    'ام سيليا': 'WIFE', 'أم سيليا': 'WIFE', 'مراته': 'WIFE',
+    'هاجر': 'HAGAR', 'محمد': 'MOHAMED',
+    'حسابي': 'MAIN', 'الخزنة': 'MAIN', 'عندي': 'MAIN'
+  };
+
+  var accountToName = {
+    'MOSTAFA': 'مصطفى', 'WIFE': 'الزوجة', 'SARA': 'سارة',
+    'HAGAR': 'هاجر', 'MOHAMED': 'محمد', 'MAIN': 'الرئيسي'
+  };
+
+  // ⭐ نمط "من X الي Y مبلغ"
+  var transferPattern = /من\s+([^\s,،]+)\s+(?:الي|الى|إلى|ل)\s+([^\s,،]+)\s+(\d+)/i;
+  var transferMatch = text.match(transferPattern);
+
+  if (!transferMatch) {
+    Logger.log('No transfer pattern found');
+    return null;
+  }
+
+  var fromName = transferMatch[1].trim();
+  var toName = transferMatch[2].trim();
+  var mainAmount = parseFloat(transferMatch[3]);
+
+  Logger.log('Transfer: from=' + fromName + ', to=' + toName + ', amount=' + mainAmount);
+
+  // تحديد الحسابات
+  var fromAccount = null;
+  var toAccount = null;
+
+  for (var key in nameToAccount) {
+    if (fromName.indexOf(key) !== -1 || key.indexOf(fromName) !== -1) {
+      fromAccount = nameToAccount[key];
+    }
+    if (toName.indexOf(key) !== -1 || key.indexOf(toName) !== -1) {
+      toAccount = nameToAccount[key];
+    }
+  }
+
+  if (!fromAccount || !toAccount) {
+    Logger.log('Could not identify accounts');
+    return null;
+  }
+
+  Logger.log('Accounts: from=' + fromAccount + ', to=' + toAccount);
+
+  // تحديد العملة
+  var currency = 'جنيه';
+  if (/ريال|ر\.?س/.test(text)) currency = 'ريال';
+  else if (/دولار|\$/.test(text)) currency = 'دولار';
+
+  var transactions = [];
+
+  // ⭐ المعاملة 1: التحويل الرئيسي
+  transactions.push({
+    nature: 'تحويل',
+    type: 'تحويل',
+    category: 'عهدة',
+    item: 'تحويل بين عهد',
+    amount: mainAmount,
+    currency: currency,
+    fromAccount: fromAccount,
+    from_account: fromAccount,
+    toAccount: toAccount,
+    to_account: toAccount,
+    description: 'تحويل من ' + accountToName[fromAccount] + ' إلى ' + accountToName[toAccount]
+  });
+
+  // ⭐ البحث عن المصروفات الفرعية
+  var remainingAmount = mainAmount;
+  var subExpenses = [];
+
+  // نمط الجمعية: "دفعت جمعية X" أو "جمعيه X"
+  var assocPattern = /(?:دفع[ت]?|صرف[ت]?)\s*(?:مراتي|زوجتي|هي)?\s*جمعي[ةه]\s*(?:[^\d]*)?(\d+)/i;
+  var assocMatch = text.match(assocPattern);
+  if (assocMatch) {
+    var assocAmount = parseFloat(assocMatch[1]);
+    subExpenses.push({
+      type: 'جمعية',
+      amount: assocAmount,
+      description: 'قسط جمعية'
+    });
+    remainingAmount -= assocAmount;
+    Logger.log('Found association: ' + assocAmount);
+  }
+
+  // نمط مصروفات محددة: "دفعت X للبيت" أو "X مصروفات"
+  var expensePattern = /(\d+)\s*(?:للبيت|مصروف|مصاريف)/i;
+  var expenseMatch = text.match(expensePattern);
+  if (expenseMatch) {
+    var expAmount = parseFloat(expenseMatch[1]);
+    subExpenses.push({
+      type: 'مصروفات',
+      amount: expAmount,
+      description: 'مصروفات منزلية'
+    });
+    remainingAmount -= expAmount;
+    Logger.log('Found expense: ' + expAmount);
+  }
+
+  // ⭐ "والباقي مصروفها" أو "والباقي معاها"
+  if (/والباقي\s*(?:مصروف|بمصروف|صرف)/i.test(text)) {
+    if (remainingAmount > 0) {
+      subExpenses.push({
+        type: 'مصروفات',
+        amount: remainingAmount,
+        description: 'مصروفات (الباقي)'
+      });
+      Logger.log('Remaining as expenses: ' + remainingAmount);
+    }
+  }
+
+  // ⭐ إضافة المصروفات الفرعية كمعاملات
+  for (var i = 0; i < subExpenses.length; i++) {
+    var exp = subExpenses[i];
+    var cat = exp.type === 'جمعية' ? 'جمعية' : 'معيشة';
+    var itm = exp.type === 'جمعية' ? 'قسط جمعية' : 'مصروفات منزلية';
+
+    transactions.push({
+      nature: 'مصروف',
+      type: 'مصروف',
+      category: cat,
+      item: itm,
+      amount: exp.amount,
+      currency: currency,
+      fromAccount: toAccount,  // الصرف من حساب المستلم
+      from_account: toAccount,
+      toAccount: '',
+      to_account: '',
+      description: exp.description + ' من ' + accountToName[toAccount]
+    });
+  }
+
+  if (transactions.length > 1) {
+    Logger.log('Local parsing successful: ' + transactions.length + ' transactions');
+    return {
+      success: true,
+      نجاح: true,
+      transactions: transactions,
+      معاملات: transactions,
+      message: 'تم تحليل ' + transactions.length + ' حركات',
+      رسالة: 'تم تحليل ' + transactions.length + ' حركات'
+    };
+  }
+
+  Logger.log('Not enough transactions found, falling back to AI');
+  return null;
+}
+
+/**
  * ⭐ بناء prompt الذكاء الاصطناعي ديناميكياً من الشيتات
  */
 function buildAIPrompt() {
@@ -298,6 +464,13 @@ function parseMessageWithGemini(userMessage, userName) {
   Logger.log('User: ' + userName);
 
   try {
+    // ⭐⭐⭐ محاولة التحليل المحلي أولاً للمعاملات المركبة ⭐⭐⭐
+    var localResult = parseCompoundTransactionLocally(userMessage);
+    if (localResult && localResult.success && localResult.transactions && localResult.transactions.length > 0) {
+      Logger.log('Local parsing succeeded with ' + localResult.transactions.length + ' transactions');
+      return localResult;
+    }
+
     var apiKey = CONFIG.GEMINI_API_KEY;
 
     if (!apiKey || apiKey.length < 10) {
