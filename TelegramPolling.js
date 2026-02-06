@@ -353,6 +353,21 @@ function getAccountDisplayName(accountCode) {
  * ⭐ إرسال نموذج المراجعة مع الأزرار
  */
 function sendPreviewWithButtons(chatId, transactions, user) {
+  // ⭐ تصحيح البنود من قاعدة البيانات قبل العرض
+  for (var vi = 0; vi < transactions.length; vi++) {
+    var t = transactions[vi];
+    var nature = t.nature || t.type || '';
+    var resolved = resolveTransactionItem(
+      nature,
+      t.category || '',
+      t.item || '',
+      t.fromAccount || t.from_account || '',
+      t.toAccount || t.to_account || ''
+    );
+    transactions[vi].category = resolved.category;
+    transactions[vi].item = resolved.item;
+  }
+
   var previewMsg = buildPreviewMessage(transactions);
 
   // حفظ المعاملات المعلقة
