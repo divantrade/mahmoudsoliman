@@ -70,6 +70,55 @@ function escapeMarkdown(text) {
     .replace(/`/g, '\\`');
 }
 
+/**
+ * ⭐ حساب رصيد العهدة لأمين العهدة (بالاسم العربي)
+ * يحول الاسم العربي لكود الحساب ويستدعي calculateAccountBalance
+ */
+function calculateCustodyBalanceFromTransactions(custodianName) {
+  try {
+    var nameToAccount = {
+      'مصطفى': 'MOSTAFA', 'مصطفي': 'MOSTAFA',
+      'سارة': 'SARA', 'ساره': 'SARA',
+      'ام سيليا': 'WIFE', 'أم سيليا': 'WIFE', 'مراتي': 'WIFE', 'زوجتي': 'WIFE',
+      'هاجر': 'HAGAR',
+      'محمد': 'MOHAMED'
+    };
+
+    var accountCode = nameToAccount[custodianName];
+    if (!accountCode) {
+      // Try lookup via CONTACTS
+      for (var key in CONTACTS) {
+        var contact = CONTACTS[key];
+        if (contact.name && contact.name.indexOf(custodianName) !== -1) {
+          accountCode = contact.account;
+          break;
+        }
+        if (contact.aliases) {
+          for (var a = 0; a < contact.aliases.length; a++) {
+            if (contact.aliases[a] === custodianName) {
+              accountCode = contact.account;
+              break;
+            }
+          }
+          if (accountCode) break;
+        }
+      }
+    }
+
+    if (!accountCode) {
+      Logger.log('⚠️ calculateCustodyBalanceFromTransactions: unknown custodian "' + custodianName + '"');
+      return 0;
+    }
+
+    var balances = calculateAccountBalance(accountCode);
+    // Return EGP balance (primary custody currency)
+    return (balances.EGP || 0);
+  } catch (error) {
+    Logger.log('Error in calculateCustodyBalanceFromTransactions: ' + error.toString());
+    return 0;
+  }
+}
+
 // =====================================================
 // ============== نظام النماذج التوضيحية ==============
 // =====================================================
@@ -1884,8 +1933,12 @@ function handleConfirmCompound(chatId, data, user) {
       successMsg += '🔢 أرقام الحركات: #' + savedIds.join(', #') + '\n\n';
 
       // حساب رصيد العهدة الحالي
-      var custodyBalance = calculateCustodyBalanceFromTransactions(compoundData.custodian);
-      successMsg += '💼 *رصيد العهدة الحالي لـ ' + compoundData.custodian + ':* ' + formatNumber(custodyBalance) + ' جنيه';
+      try {
+        var custodyBalance = calculateCustodyBalanceFromTransactions(compoundData.custodian);
+        successMsg += '💼 *رصيد العهدة الحالي لـ ' + compoundData.custodian + ':* ' + formatNumber(custodyBalance) + ' جنيه';
+      } catch (balErr) {
+        Logger.log('Balance calc error in compound (non-fatal): ' + balErr.toString());
+      }
 
       if (failedCount > 0) {
         successMsg += '\n\n⚠️ تنبيه: فشل حفظ ' + failedCount + ' معاملة';
@@ -1908,68 +1961,82 @@ function handleConfirmCompound(chatId, data, user) {
 function handleConfirmSave(chatId, user) {
   Logger.log('=== handleConfirmSave ===');
 
-  var pending = getPendingTransaction(chatId);
-  if (!pending || !pending.transactions) {
-    sendMessage(chatId, '⏰ انتهت صلاحية المعاملة. أعد كتابة الرسالة.');
-    return;
-  }
-
-  var transactions = pending.transactions;
-  var successCount = 0;
-  var savedIds = [];
-  var details = [];
-
-  for (var i = 0; i < transactions.length; i++) {
-    var transData = transactions[i];
-    // ⭐ استخدام user_name من الكاش إذا كان user.name فارغاً
-    transData.user_name = user.name || transData.user_name || (pending.user && pending.user.name) || '';
-    transData.telegram_id = user.telegram_id || transData.telegram_id || (pending.user && pending.user.telegram_id) || '';
-
-    var result = addTransaction(transData);
-    Logger.log('Save result: ' + JSON.stringify(result));
-
-    if (result && result.success) {
-      successCount++;
-      savedIds.push(result.id);
-
-      var detail = transData.type + ': ' + transData.amount + ' ' + transData.currency;
-      if (transData.contact) {
-        detail += ' لـ ' + transData.contact;
-      }
-
-      // لو عهدة، نحسب الرصيد
-      if (transData.type === 'إيداع_عهدة' || transData.type === 'صرف_من_عهدة') {
-        var custodian = transData.contact || 'سارة';
-        var balance = calculateCustodyBalanceFromTransactions(custodian);
-        detail += '\n   💼 رصيد العهدة: ' + balance + ' جنيه';
-      }
-
-      details.push(detail);
+  try {
+    var pending = getPendingTransaction(chatId);
+    if (!pending || !pending.transactions) {
+      sendMessage(chatId, '⏰ انتهت صلاحية المعاملة. أعد كتابة الرسالة.');
+      return;
     }
-  }
 
-  // ⭐ إرسال رسالة النجاح أولاً، ثم حذف المعاملة المعلقة
-  // هذا يضمن أن المستخدم يرى رسالة التأكيد حتى لو حدث خطأ لاحقاً
+    var transactions = pending.transactions;
+    var successCount = 0;
+    var savedIds = [];
+    var details = [];
 
-  if (successCount > 0) {
-    // ⭐ رسالة بسيطة بدون تنسيق معقد
-    var msg = 'تم الحفظ بنجاح! رقم الحركة: #' + savedIds.join(', #');
+    for (var i = 0; i < transactions.length; i++) {
+      var transData = transactions[i];
+      // ⭐ استخدام user_name من الكاش إذا كان user.name فارغاً
+      transData.user_name = user.name || transData.user_name || (pending.user && pending.user.name) || '';
+      transData.telegram_id = user.telegram_id || transData.telegram_id || (pending.user && pending.user.telegram_id) || '';
 
-    // ⭐ إرسال مع التحقق من النجاح
-    var sent = sendMessage(chatId, msg);
-    Logger.log('Success message sent: ' + sent + ' to ' + chatId);
+      var result = addTransaction(transData);
+      Logger.log('Save result: ' + JSON.stringify(result));
 
-    if (!sent) {
-      // محاولة أخيرة برسالة أبسط
-      Logger.log('Retrying with simpler message...');
-      sendMessage(chatId, 'تم الحفظ #' + savedIds[0]);
+      if (result && result.success) {
+        successCount++;
+        savedIds.push(result.id);
+
+        var detail = (transData.type || transData.nature || '') + ': ' + transData.amount + ' ' + transData.currency;
+        if (transData.contact) {
+          detail += ' لـ ' + transData.contact;
+        }
+
+        // لو عهدة، نحسب الرصيد (مع حماية من الأخطاء لعدم تعطيل رسالة النجاح)
+        if (transData.type === 'إيداع_عهدة' || transData.type === 'صرف_من_عهدة' || transData.nature === 'تحويل') {
+          try {
+            var custodian = transData.contact || 'سارة';
+            var balance = calculateCustodyBalanceFromTransactions(custodian);
+            if (balance !== 0) {
+              detail += '\n   💼 رصيد العهدة: ' + balance + ' جنيه';
+            }
+          } catch (balErr) {
+            Logger.log('Balance calc error (non-fatal): ' + balErr.toString());
+          }
+        }
+
+        details.push(detail);
+      }
     }
-  } else {
-    sendMessage(chatId, 'فشل حفظ المعاملة. حاول مرة أخرى.');
-  }
 
-  // ⭐ حذف المعاملة المعلقة بعد إرسال الرسالة
-  removePendingTransaction(chatId);
+    // ⭐ إرسال رسالة النجاح أولاً، ثم حذف المعاملة المعلقة
+    // هذا يضمن أن المستخدم يرى رسالة التأكيد حتى لو حدث خطأ لاحقاً
+
+    if (successCount > 0) {
+      // ⭐ رسالة بسيطة بدون تنسيق معقد
+      var msg = 'تم الحفظ بنجاح! رقم الحركة: #' + savedIds.join(', #');
+
+      // ⭐ إرسال مع التحقق من النجاح
+      var sent = sendMessage(chatId, msg);
+      Logger.log('Success message sent: ' + sent + ' to ' + chatId);
+
+      if (!sent) {
+        // محاولة أخيرة برسالة أبسط
+        Logger.log('Retrying with simpler message...');
+        sendMessage(chatId, 'تم الحفظ #' + savedIds[0]);
+      }
+    } else {
+      sendMessage(chatId, 'فشل حفظ المعاملة. حاول مرة أخرى.');
+    }
+
+    // ⭐ حذف المعاملة المعلقة بعد إرسال الرسالة
+    removePendingTransaction(chatId);
+
+  } catch (error) {
+    Logger.log('Error in handleConfirmSave: ' + error.toString());
+    sendMessage(chatId, '❌ خطأ في حفظ المعاملة: ' + error.message);
+    // حذف المعاملة المعلقة حتى في حالة الخطأ
+    try { removePendingTransaction(chatId); } catch(e) {}
+  }
 }
 
 /**
