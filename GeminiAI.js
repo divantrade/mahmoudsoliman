@@ -130,126 +130,157 @@ function parseCompoundTransactionLocally(message) {
       description: 'تحويل ' + amountSAR + ' ريال (= ' + amountEGP + ' جنيه) لعهدة ' + custodyName
     });
 
-    // ⭐ استخراج التوزيعات
+    // ⭐⭐⭐ استخراج التوزيعات - محلل شامل ⭐⭐⭐
     var remainingEGP = amountEGP;
 
-    // نمط "ياخد/يعطي [لنفسه|لشخص] [مبلغ]" أو "[مبلغ] ياخد/يعطي"
-    var distPatterns = [
-      /(?:ياخد|ياخذ|يعطي|تعطي|تاخد)\s+(?:منهم\s+)?(?:لنفسه?\s+|ل\S+\s+)?(\d+)/i,
-      /(?:منهم\s+)?(?:لنفسه?\s+|ل\S+\s+)?(\d+)\s*(?:جني[هة]|ليره)?\s*(?:ياخد|يعطي)/i,
-      /(?:ياخد|ياخذ|يعطي|تعطي|تاخد)\s+(\d+)/i,
-      /منهم\s+(\d+)/i,
-      /منهم\s+(?:ل\S+|لنفسه?)\s+(\d+)/i,
-    ];
-
-    var selfAmount = 0;
-    for (var dp = 0; dp < distPatterns.length; dp++) {
-      var distMatch = text.match(distPatterns[dp]);
-      if (distMatch) {
-        selfAmount = parseFloat(distMatch[1]);
-        Logger.log('Distribution found with pattern ' + dp + ': ' + selfAmount);
-        break;
-      }
+    // استخراج الجزء الخاص بالتوزيع (بعد معلومات التحويل الرئيسي)
+    var distText = text;
+    var distStart = text.search(/(?:يدفع|تدفع|يعطي|تعطي|ياخد|ياخذ|تاخد|منهم|منها)/i);
+    if (distStart !== -1) {
+      distText = text.substring(distStart);
     }
+    Logger.log('Distribution text: ' + distText);
 
-    // تحديد من يأخد - الشخص المذكور أو أمين العهدة نفسه
-    var recipientAccount = custodyAccount;
-    var recipientName = custodyName;
-    var recipientMatch = text.match(/(?:ياخد|يعطي|تعطي|تاخد)\s+(?:منهم\s+)?ل(\S+)/i);
-    if (recipientMatch) {
-      var recName = recipientMatch[1].trim();
-      if (/نفس/i.test(recName)) {
-        recipientAccount = custodyAccount;
-      } else {
-        for (var rk in nameToAccount) {
-          if (recName === rk || recName.indexOf(rk) !== -1 || rk.indexOf(recName) !== -1) {
-            recipientAccount = nameToAccount[rk];
-            recipientName = rk;
-          }
+    // ⭐ تقسيم التوزيع بالواو للحصول على كل جزء
+    // مثال: "يدفع لمراتي 4000 ولنفسه 5000 والباقي عهده"
+    // → ["يدفع لمراتي 4000", "لنفسه 5000", "الباقي عهده"]
+    var distParts = distText.split(/\s+و/);
+    Logger.log('Distribution parts: ' + JSON.stringify(distParts));
+
+    for (var di = 0; di < distParts.length; di++) {
+      var part = distParts[di].trim();
+      if (!part) continue;
+      Logger.log('Processing distribution part [' + di + ']: ' + part);
+
+      // تجاهل "الباقي عهده/عهدة" - يبقى في العهدة
+      if (/(?:الباقي|المتبقي|يتبقي|يفضل|تفضل)\s*(?:عهد[ةه]|في\s*العهد[ةه]|معاه?)/i.test(part)) {
+        Logger.log('  → Remaining stays in custody, skipping');
+        continue;
+      }
+
+      // استخراج المبلغ من هذا الجزء
+      var amountMatch = part.match(/(\d+(?:\.\d+)?)/);
+      if (!amountMatch) {
+        Logger.log('  → No amount found, skipping');
+        continue;
+      }
+      var partAmount = parseFloat(amountMatch[1]);
+      if (partAmount <= 0) continue;
+
+      // فحص جمعية
+      if (/جمعي[ةه]/i.test(part)) {
+        Logger.log('  → Association: ' + partAmount);
+        transactions.push({
+          nature: 'مصروف',
+          type: 'مصروف',
+          category: 'جمعية',
+          item: 'قسط جمعية',
+          amount: partAmount,
+          currency: 'جنيه',
+          fromAccount: custodyAccount,
+          from_account: custodyAccount,
+          toAccount: '',
+          to_account: '',
+          description: 'قسط جمعية من عهدة ' + custodyName
+        });
+        remainingEGP -= partAmount;
+        continue;
+      }
+
+      // استخراج اسم الشخص المستفيد
+      // أنماط: "لمراتي", "لسارة", "لمصطفي", "لنفسه", "له"
+      var personMatch = part.match(/(?:ل|الي|إلي|الى|إلى)\s*(\S+)/i);
+      var personName = personMatch ? personMatch[1].trim() : '';
+
+      // تنظيف اسم الشخص من الأرقام
+      personName = personName.replace(/\d/g, '').trim();
+
+      Logger.log('  → Person: "' + personName + '", Amount: ' + partAmount);
+
+      // تحديد إذا كان "لنفسه/له" = صرف من العهدة لأمين العهدة
+      var isSelf = /نفس[هو]?|^ه$|^له$/i.test(personName);
+
+      if (isSelf) {
+        // صرف شخصي لأمين العهدة
+        Logger.log('  → Self expense for custodian: ' + partAmount);
+        transactions.push({
+          nature: 'مصروف',
+          type: 'مصروف',
+          category: 'صرف_عهدة',
+          item: 'مصروف شخصي ' + accountToName[custodyAccount],
+          amount: partAmount,
+          currency: 'جنيه',
+          fromAccount: custodyAccount,
+          from_account: custodyAccount,
+          toAccount: '',
+          to_account: '',
+          description: 'مصروف شخصي ' + partAmount + ' جنيه من عهدة ' + custodyName
+        });
+        remainingEGP -= partAmount;
+        continue;
+      }
+
+      // تحديد حساب الشخص المستفيد
+      var targetAccount = '';
+      var targetName = personName;
+      for (var nk in nameToAccount) {
+        if (personName === nk || personName.indexOf(nk) !== -1 || nk.indexOf(personName) !== -1) {
+          targetAccount = nameToAccount[nk];
+          targetName = nk;
         }
       }
-    }
 
-    if (selfAmount > 0) {
-      // معاملة صرف من العهدة
-      transactions.push({
-        nature: 'مصروف',
-        type: 'مصروف',
-        category: 'صرف_عهدة',
-        item: 'صرف من عهدة ' + accountToName[custodyAccount],
-        amount: selfAmount,
-        currency: 'جنيه',
-        fromAccount: custodyAccount,
-        from_account: custodyAccount,
-        toAccount: '',
-        to_account: '',
-        description: 'صرف ' + selfAmount + ' جنيه من عهدة ' + custodyName
-      });
-      remainingEGP -= selfAmount;
-    }
-
-    // فحص جمعية
-    var assocPatterns = [
-      /(?:تدفع|يدفع|دفع)\s+جمعي[ةه]\s+(\d+)/i,
-      /جمعي[ةه]\s+(\d+)/i,
-      /(\d+)\s+جمعي[ةه]/i,
-    ];
-    var assocAmount = 0;
-    for (var ap = 0; ap < assocPatterns.length; ap++) {
-      var assocMatch = text.match(assocPatterns[ap]);
-      if (assocMatch) {
-        assocAmount = parseFloat(assocMatch[1]);
-        break;
-      }
-    }
-    if (assocAmount > 0) {
-      transactions.push({
-        nature: 'مصروف',
-        type: 'مصروف',
-        category: 'جمعية',
-        item: 'قسط جمعية',
-        amount: assocAmount,
-        currency: 'جنيه',
-        fromAccount: custodyAccount,
-        from_account: custodyAccount,
-        toAccount: '',
-        to_account: '',
-        description: 'قسط جمعية من عهدة ' + custodyName
-      });
-      remainingEGP -= assocAmount;
-    }
-
-    // فحص مساعدات للأهل
-    var helpPatterns = [
-      /(?:تعطي|يعطي|اعطي)\s+(\S+)\s+(\d+)/i,
-    ];
-    for (var hp = 0; hp < helpPatterns.length; hp++) {
-      var helpMatch = text.match(helpPatterns[hp]);
-      if (helpMatch) {
-        var helpPersonRaw = helpMatch[1].trim();
-        var helpAmount = parseFloat(helpMatch[2]);
-        var helpAccount = '';
-        for (var hk in nameToAccount) {
-          if (helpPersonRaw === hk || helpPersonRaw.indexOf(hk) !== -1 || hk.indexOf(helpPersonRaw) !== -1) {
-            helpAccount = nameToAccount[hk];
-          }
-        }
-        if (helpAccount && helpAmount > 0) {
-          transactions.push({
-            nature: 'تحويل',
-            type: 'تحويل',
-            category: 'عهدة',
-            item: 'تحويل بين عهد',
-            amount: helpAmount,
-            currency: 'جنيه',
-            fromAccount: custodyAccount,
-            from_account: custodyAccount,
-            toAccount: helpAccount,
-            to_account: helpAccount,
-            description: 'تحويل من عهدة ' + custodyName + ' إلى ' + helpPersonRaw
-          });
-          remainingEGP -= helpAmount;
-        }
+      if (targetAccount && targetAccount !== custodyAccount) {
+        // تحويل بين عهد (من أمين العهدة إلى شخص آخر)
+        Logger.log('  → Transfer to ' + targetName + ' (' + targetAccount + '): ' + partAmount);
+        transactions.push({
+          nature: 'تحويل',
+          type: 'تحويل',
+          category: 'عهدة',
+          item: 'تحويل لعهدة ' + accountToName[targetAccount],
+          amount: partAmount,
+          currency: 'جنيه',
+          fromAccount: custodyAccount,
+          from_account: custodyAccount,
+          toAccount: targetAccount,
+          to_account: targetAccount,
+          description: 'تحويل ' + partAmount + ' جنيه من عهدة ' + custodyName + ' إلى ' + targetName
+        });
+        remainingEGP -= partAmount;
+      } else if (targetAccount === custodyAccount) {
+        // صرف شخصي (الشخص نفسه)
+        Logger.log('  → Self expense (same account): ' + partAmount);
+        transactions.push({
+          nature: 'مصروف',
+          type: 'مصروف',
+          category: 'صرف_عهدة',
+          item: 'مصروف شخصي ' + accountToName[custodyAccount],
+          amount: partAmount,
+          currency: 'جنيه',
+          fromAccount: custodyAccount,
+          from_account: custodyAccount,
+          toAccount: '',
+          to_account: '',
+          description: 'مصروف شخصي ' + partAmount + ' جنيه من عهدة ' + custodyName
+        });
+        remainingEGP -= partAmount;
+      } else if (partAmount > 0) {
+        // لم نتعرف على الشخص - نعتبره مصروف عام
+        Logger.log('  → Unknown person, treating as expense: ' + partAmount);
+        transactions.push({
+          nature: 'مصروف',
+          type: 'مصروف',
+          category: 'صرف_عهدة',
+          item: personName || 'مصروف من العهدة',
+          amount: partAmount,
+          currency: 'جنيه',
+          fromAccount: custodyAccount,
+          from_account: custodyAccount,
+          toAccount: '',
+          to_account: '',
+          description: 'صرف ' + partAmount + ' جنيه من عهدة ' + custodyName + (personName ? ' (' + personName + ')' : '')
+        });
+        remainingEGP -= partAmount;
       }
     }
 
