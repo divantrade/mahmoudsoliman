@@ -405,13 +405,27 @@ function sendPreviewWithButtons(chatId, transactions, user) {
   // ⭐ تصحيح البنود من قاعدة البيانات قبل العرض
   for (var vi = 0; vi < transactions.length; vi++) {
     var t = transactions[vi];
-    var nature = t.nature || t.type || '';
+    // تحويل النوع القديم للطبيعة الجديدة لضمان المطابقة الصحيحة
+    var nature = t.nature || '';
+    if (!nature && t.type) {
+      nature = mapOldTypeToNature(t.type) || t.type;
+    }
+    // استخراج حسابات من جهة الاتصال إذا لم تكن موجودة
+    var resolveFrom = t.fromAccount || t.from_account || '';
+    var resolveTo = t.toAccount || t.to_account || '';
+    if (nature === 'تحويل' && !resolveTo && t.contact) {
+      var contactInfo = CONTACTS[t.contact];
+      if (contactInfo && contactInfo.account) {
+        resolveTo = contactInfo.account;
+        if (!resolveFrom) resolveFrom = 'MAIN';
+      }
+    }
     var resolved = resolveTransactionItem(
       nature,
       t.category || '',
       t.item || '',
-      t.fromAccount || t.from_account || '',
-      t.toAccount || t.to_account || ''
+      resolveFrom,
+      resolveTo
     );
     transactions[vi].category = resolved.category;
     transactions[vi].item = resolved.item;
