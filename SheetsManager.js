@@ -715,21 +715,41 @@ function calculateAccountBalance(accountCode) {
 function normalizeCurrency(currency) {
   if (!currency) return 'SAR';
 
+  // تنظيف القيمة من المسافات والأحرف الخفية
+  var cleaned = currency.toString().trim().replace(/[\u200B-\u200D\u200E\u200F\uFEFF\u00A0]/g, '');
+  if (!cleaned) return 'SAR';
+
   const currencyMap = {
     'ريال': 'SAR',
     'ر.س': 'SAR',
+    'sar': 'SAR',
     'SAR': 'SAR',
     'جنيه': 'EGP',
+    'جنية': 'EGP',
     'ج.م': 'EGP',
+    'ج م': 'EGP',
+    'egp': 'EGP',
     'EGP': 'EGP',
     'دولار': 'USD',
     '$': 'USD',
+    'usd': 'USD',
     'USD': 'USD',
     'درهم': 'AED',
-    'AED': 'AED'
+    'aed': 'AED',
+    'AED': 'AED',
+    'ليرة': 'EGP',
+    'ليره': 'EGP'
   };
 
-  return currencyMap[currency] || currency;
+  // بحث مباشر
+  if (currencyMap[cleaned]) return currencyMap[cleaned];
+
+  // بحث جزئي (يدعم "جنيه مصري" أو "ريال سعودي")
+  for (var key in currencyMap) {
+    if (cleaned.indexOf(key) !== -1) return currencyMap[key];
+  }
+
+  return cleaned;
 }
 
 /**

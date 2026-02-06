@@ -704,7 +704,7 @@ function handleCommand(chatId, text, user) {
 
     case '/custody':
     case '/عهدة':
-      sendMessage(chatId, generateCustodyReport());
+      sendCustodyMenu(chatId);
       break;
 
     case '/sara':
@@ -1692,6 +1692,7 @@ function sendHelpMessage(chatId, user) {
     '/امثلة - كل النماذج التوضيحية\n' +
     '/report - قائمة التقارير\n' +
     '/monthly - التقرير الشامل\n' +
+    '/custody - تقارير العهد\n' +
     '/statement - كشف حساب تفصيلي\n' +
     '/balance - الأرصدة\n' +
     '/gold - تقرير الذهب\n' +
@@ -1807,6 +1808,32 @@ function sendStatementAccountMenu(chatId) {
   };
 
   sendMessage(chatId, '📋 *اختر الحساب لعرض كشف الحساب:*', keyboard);
+}
+
+/**
+ * قائمة اختيار العهد
+ */
+function sendCustodyMenu(chatId) {
+  var keyboard = {
+    inline_keyboard: [
+      [
+        { text: '📊 كل العهد', callback_data: 'cust_ALL' }
+      ],
+      [
+        { text: '💕 الزوجة (سارة)', callback_data: 'cust_WIFE' },
+        { text: '👧 سارة (الأخت)', callback_data: 'cust_SARA' }
+      ],
+      [
+        { text: '👦 مصطفى', callback_data: 'cust_MOSTAFA' },
+        { text: '👧 هاجر', callback_data: 'cust_HAGAR' }
+      ],
+      [
+        { text: '👦 محمد', callback_data: 'cust_MOHAMED' }
+      ]
+    ]
+  };
+
+  sendMessage(chatId, '💼 *اختر العهدة:*', keyboard);
 }
 
 /**
@@ -1956,6 +1983,32 @@ function handleCallbackQuery(callbackQuery) {
     var cancelKey = data.replace('cancel_', '');
     CacheService.getScriptCache().remove(cancelKey);
     sendMessage(chatId, '❌ تم الإلغاء.');
+    answerCallbackQuery(callbackQuery.id);
+    return;
+  }
+
+  // ⭐ معالجة أزرار العهد
+  if (data.indexOf('cust_') === 0) {
+    var custCode = data.replace('cust_', '');
+    sendChatAction(chatId, 'typing');
+    try {
+      if (custCode === 'ALL') {
+        // تقرير كل العهد
+        sendReportWithPdfOption(chatId, generateCustodyReport(), 'تقرير_العهد');
+      } else {
+        // تقرير عهدة فردية = كشف حساب
+        var custNames = {
+          'WIFE': 'الزوجة', 'SARA': 'سارة', 'MOSTAFA': 'مصطفى',
+          'HAGAR': 'هاجر', 'MOHAMED': 'محمد'
+        };
+        var pdfTitle = 'كشف_حساب_' + (custNames[custCode] || custCode);
+        var custReport = generateAccountStatement(custCode);
+        sendReportWithPdfOption(chatId, custReport, pdfTitle);
+      }
+    } catch (error) {
+      Logger.log('Custody report error: ' + error.toString());
+      sendMessage(chatId, '❌ خطأ في تقرير العهدة: ' + error.message);
+    }
     answerCallbackQuery(callbackQuery.id);
     return;
   }
@@ -2446,6 +2499,7 @@ function setupBotMenu() {
     { command: 'start', description: '🏠 البداية والقائمة الرئيسية' },
     { command: 'report', description: '📊 قائمة التقارير' },
     { command: 'monthly', description: '📊 التقرير الشامل الشهري' },
+    { command: 'custody', description: '💼 تقارير العهد' },
     { command: 'statement', description: '📋 كشف حساب تفصيلي' },
     { command: 'balance', description: '💰 الأرصدة الحالية' },
     { command: 'associations', description: '🔄 تقرير الجمعيات' },
