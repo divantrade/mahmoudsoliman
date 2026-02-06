@@ -349,26 +349,43 @@ function normalizeAIResponse(data) {
   }
 
   // تحويل المعاملات
-  const transactions = (data.معاملات || data.transactions || []).map(t => ({
-    nature: t.طبيعة || t.nature || t.نوع || t.type || '',
-    category: t.تصنيف || t.category || '',
-    item: t.بند || t.item || '',
-    amount: parseFloat(t.مبلغ || t.amount) || 0,
-    currency: normalizeCurrency(t.عملة || t.currency),
-    fromAccount: t.من_حساب || t.fromAccount || t.from_account || '',
-    toAccount: t.إلى_حساب || t.toAccount || t.to_account || '',
-    convertedAmount: parseFloat(t.مبلغ_محول || t.مبلغ_مستلم || t.convertedAmount || t.amount_received) || null,
-    convertedCurrency: normalizeCurrency(t.عملة_محول || t.عملة_مستلمة || t.convertedCurrency || t.currency_received),
-    exchangeRate: parseFloat(t.سعر_صرف || t.سعر_الصرف || t.exchangeRate || t.exchange_rate) || null,
-    description: t.وصف || t.description || '',
-    contact: t.جهة || t.contact || '',
+  const transactions = (data.معاملات || data.transactions || []).map(t => {
+    var trans = {
+      nature: t.طبيعة || t.nature || t.نوع || t.type || '',
+      category: t.تصنيف || t.category || '',
+      item: t.بند || t.item || '',
+      amount: parseFloat(t.مبلغ || t.amount) || 0,
+      currency: normalizeCurrency(t.عملة || t.currency),
+      fromAccount: t.من_حساب || t.fromAccount || t.from_account || '',
+      toAccount: t.إلى_حساب || t.toAccount || t.to_account || '',
+      convertedAmount: parseFloat(t.مبلغ_محول || t.مبلغ_مستلم || t.convertedAmount || t.amount_received) || null,
+      convertedCurrency: normalizeCurrency(t.عملة_محول || t.عملة_مستلمة || t.convertedCurrency || t.currency_received),
+      exchangeRate: parseFloat(t.سعر_صرف || t.سعر_الصرف || t.exchangeRate || t.exchange_rate) || null,
+      description: t.وصف || t.description || '',
+      contact: t.جهة || t.contact || '',
 
-    // للتوافق مع النظام القديم
-    type: mapNatureToOldType(t.طبيعة || t.nature || t.نوع || t.type),
-    amount_received: parseFloat(t.مبلغ_محول || t.مبلغ_مستلم || t.convertedAmount || t.amount_received) || null,
-    currency_received: normalizeCurrency(t.عملة_محول || t.عملة_مستلمة || t.convertedCurrency || t.currency_received),
-    exchange_rate: parseFloat(t.سعر_صرف || t.سعر_الصرف || t.exchangeRate || t.exchange_rate) || null
-  }));
+      // للتوافق مع النظام القديم
+      type: mapNatureToOldType(t.طبيعة || t.nature || t.نوع || t.type),
+      amount_received: parseFloat(t.مبلغ_محول || t.مبلغ_مستلم || t.convertedAmount || t.amount_received) || null,
+      currency_received: normalizeCurrency(t.عملة_محول || t.عملة_مستلمة || t.convertedCurrency || t.currency_received),
+      exchange_rate: parseFloat(t.سعر_صرف || t.سعر_الصرف || t.exchangeRate || t.exchange_rate) || null
+    };
+
+    // ⭐⭐⭐ استخراج الحسابات من الوصف إذا كانت فارغة ⭐⭐⭐
+    if ((trans.nature === 'تحويل' || trans.type === 'تحويل') && (!trans.fromAccount || !trans.toAccount)) {
+      var extracted = extractAccountsFromDescription(trans.description);
+      if (extracted.fromAccount && !trans.fromAccount) {
+        trans.fromAccount = extracted.fromAccount;
+        trans.from_account = extracted.fromAccount;
+      }
+      if (extracted.toAccount && !trans.toAccount) {
+        trans.toAccount = extracted.toAccount;
+        trans.to_account = extracted.toAccount;
+      }
+    }
+
+    return trans;
+  });
 
   return {
     success: true,
@@ -380,6 +397,51 @@ function normalizeAIResponse(data) {
     needsClarification: data.يحتاج_توضيح || data.needsClarification || false,
     clarificationQuestion: data.سؤال_توضيحي || data.clarificationQuestion || ''
   };
+}
+
+/**
+ * ⭐ استخراج الحسابات من وصف الحركة
+ */
+function extractAccountsFromDescription(description) {
+  var result = { fromAccount: '', toAccount: '' };
+  if (!description) return result;
+
+  // قاموس الأسماء والحسابات
+  var nameToAccount = {
+    'مصطفى': 'MOSTAFA', 'مصطفي': 'MOSTAFA',
+    'سارة': 'SARA', 'ساره': 'SARA',
+    'الزوجة': 'WIFE', 'الزوجه': 'WIFE', 'مراتي': 'WIFE', 'زوجتي': 'WIFE',
+    'ام سيليا': 'WIFE', 'أم سيليا': 'WIFE',
+    'هاجر': 'HAGAR', 'محمد': 'MOHAMED',
+    'حسابي': 'MAIN', 'الرئيسي': 'MAIN', 'الخزنة': 'MAIN'
+  };
+
+  // البحث عن "من X"
+  var fromMatch = description.match(/من عهدة? ([^\s]+)|من ([^\s]+) ل/);
+  if (fromMatch) {
+    var name = (fromMatch[1] || fromMatch[2] || '').replace(/ة$/, 'ه');
+    for (var key in nameToAccount) {
+      if (name.indexOf(key) !== -1 || key.indexOf(name) !== -1) {
+        result.fromAccount = nameToAccount[key];
+        break;
+      }
+    }
+  }
+
+  // البحث عن "لـ Y"
+  var toMatch = description.match(/لعهدة? ([^\s]+)|ل([^\s]+)$/);
+  if (toMatch) {
+    var name2 = (toMatch[1] || toMatch[2] || '').replace(/ة$/, 'ه');
+    for (var key2 in nameToAccount) {
+      if (name2.indexOf(key2) !== -1 || key2.indexOf(name2) !== -1) {
+        result.toAccount = nameToAccount[key2];
+        break;
+      }
+    }
+  }
+
+  Logger.log('Extracted: from=' + result.fromAccount + ', to=' + result.toAccount);
+  return result;
 }
 
 /**
