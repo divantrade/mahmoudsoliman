@@ -888,6 +888,110 @@ function saveMultipleTransactions(transactions, user) {
 }
 
 /**
+ * ⭐ دالة التوافق: إضافة معاملة (للتوافق مع الكود القديم)
+ * تحول البيانات من التنسيق القديم للجديد ثم تحفظها
+ */
+function addTransaction(transData) {
+  try {
+    Logger.log('=== addTransaction (compatibility) ===');
+    Logger.log('Input: ' + JSON.stringify(transData));
+
+    // تحويل البيانات من التنسيق القديم للجديد
+    const newFormat = {
+      // الطبيعة من النوع القديم
+      nature: mapOldTypeToNature(transData.type) || transData.nature || transData.طبيعة || '',
+      category: transData.category || transData.تصنيف || '',
+      item: transData.item || transData.بند || '',
+      amount: parseFloat(transData.amount || transData.مبلغ) || 0,
+      currency: transData.currency || transData.عملة || 'ريال',
+
+      // ⭐ تحديد من/إلى حساب
+      fromAccount: transData.fromAccount || transData.from_account || transData.من_حساب || '',
+      toAccount: transData.toAccount || transData.to_account || transData.إلى_حساب || '',
+
+      // التحويل
+      convertedAmount: parseFloat(transData.amount_received || transData.convertedAmount || transData.مبلغ_محول) || null,
+      convertedCurrency: transData.currency_received || transData.convertedCurrency || transData.عملة_محول || '',
+      exchangeRate: parseFloat(transData.exchange_rate || transData.exchangeRate || transData.سعر_صرف) || null,
+
+      description: transData.description || transData.وصف || '',
+      notes: transData.notes || transData.ملاحظات || ''
+    };
+
+    // ⭐ تحديد الحسابات تلقائياً حسب نوع الحركة
+    if (!newFormat.fromAccount && !newFormat.toAccount) {
+      switch (newFormat.nature) {
+        case 'إيراد':
+          newFormat.toAccount = 'MAIN';
+          break;
+        case 'مصروف':
+          newFormat.fromAccount = 'MAIN';
+          break;
+        case 'تحويل':
+          newFormat.fromAccount = 'MAIN';
+          // تحديد الوجهة من جهة الاتصال
+          if (transData.contact) {
+            var contact = CONTACTS[transData.contact];
+            if (contact && contact.account) {
+              newFormat.toAccount = contact.account;
+            } else {
+              newFormat.toAccount = transData.contact;
+            }
+          }
+          break;
+      }
+    }
+
+    // معلومات المستخدم
+    const user = {
+      name: transData.user_name || 'غير معروف',
+      telegramId: transData.telegram_id || ''
+    };
+
+    Logger.log('Converted format: ' + JSON.stringify(newFormat));
+
+    // حفظ بالتنسيق الجديد
+    const result = saveTransaction(newFormat, user);
+
+    // إرجاع بالتنسيق القديم للتوافق
+    return {
+      success: result.success,
+      id: result.transactionId,
+      message: result.message
+    };
+
+  } catch (error) {
+    Logger.log('Error in addTransaction: ' + error.toString());
+    return {
+      success: false,
+      id: null,
+      message: '❌ خطأ: ' + error.message
+    };
+  }
+}
+
+/**
+ * تحويل النوع القديم للطبيعة الجديدة
+ */
+function mapOldTypeToNature(oldType) {
+  const map = {
+    'دخل': 'إيراد',
+    'income': 'إيراد',
+    'مصروف': 'مصروف',
+    'expense': 'مصروف',
+    'تحويل': 'تحويل',
+    'transfer': 'تحويل',
+    'إيداع_عهدة': 'تحويل',
+    'صرف_من_عهدة': 'مصروف',
+    'ذهب': 'استثمار',
+    'gold': 'استثمار',
+    'جمعية': 'مصروف',
+    'سلفة': 'تحويل'
+  };
+  return map[oldType] || oldType;
+}
+
+/**
  * بناء رسالة التأكيد
  */
 function buildConfirmationMessage(trans) {
