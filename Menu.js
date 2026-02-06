@@ -1,6 +1,7 @@
 /**
  * =====================================================
- * نظام محمود المحاسبي - القائمة المخصصة
+ * نظام محمود المحاسبي v2.0 - القائمة المخصصة
+ * نظام القيد المزدوج - Double Entry
  * =====================================================
  * قائمة تظهر في شريط الأدوات لتشغيل التقارير والأدوات
  */
@@ -11,24 +12,29 @@
 function onOpen() {
   var ui = SpreadsheetApp.getUi();
 
-  ui.createMenu('💼 نظام محمود')
+  ui.createMenu('💼 نظام محمود v2.0')
     // قسم التقارير
     .addSubMenu(ui.createMenu('📊 التقارير')
-      .addItem('تقرير اليوم', 'menuShowTodayReport')
-      .addItem('تقرير الأسبوع', 'menuShowWeekReport')
-      .addItem('تقرير الشهر', 'menuShowMonthReport')
+      .addItem('تقرير أرصدة الحسابات', 'menuShowBalancesReport')
+      .addItem('تقرير الشهر الحالي', 'menuShowMonthReport')
+      .addItem('التقرير الشامل', 'menuShowComprehensiveReport')
       .addSeparator()
       .addItem('تقرير مخصص...', 'menuShowCustomReport'))
 
-    // قسم العهدة
-    .addSubMenu(ui.createMenu('💰 العهدة')
-      .addItem('تحديث تقرير عهدة سارة', 'menuUpdateSaraCustody')
-      .addItem('تحديث تقرير عهدة مصطفى', 'menuUpdateMostafaCustody')
+    // قسم الحسابات
+    .addSubMenu(ui.createMenu('💰 الحسابات')
+      .addItem('عرض جميع الحسابات', 'menuShowAllAccounts')
+      .addItem('كشف حساب...', 'menuShowAccountStatement')
       .addSeparator()
-      .addItem('تحديث جميع تقارير العهدة', 'menuUpdateAllCustody')
+      .addItem('تقرير حسابات العهدة', 'menuShowCustodyReport')
+      .addItem('تقرير المدخرات', 'menuShowSavingsReport')
+      .addItem('تقرير الاستثمارات', 'menuShowInvestmentsReport'))
+
+    // قسم العهدة (للتوافق مع القديم)
+    .addSubMenu(ui.createMenu('👤 العهدة')
+      .addItem('تقرير حسابات العهدة', 'menuShowCustodyReport')
       .addSeparator()
-      .addItem('عرض رصيد سارة', 'menuShowSaraBalance')
-      .addItem('عرض رصيد مصطفى', 'menuShowMostafaBalance'))
+      .addItem('عرض رصيد حساب...', 'menuShowSpecificAccountBalance'))
 
     // قسم الجمعيات
     .addSubMenu(ui.createMenu('🤝 الجمعيات')
@@ -45,6 +51,7 @@ function onOpen() {
       .addItem('إعادة حساب الأرصدة', 'menuRecalculateBalances')
       .addItem('تنظيف البيانات', 'menuCleanData')
       .addSeparator()
+      .addItem('عرض معلومات النظام', 'menuShowSystemInfo')
       .addItem('إنشاء جميع الشيتات', 'menuInitializeSheets'))
 
     // قسم النسخ الاحتياطي
@@ -63,46 +70,20 @@ function onOpen() {
 }
 
 // =====================================================
-// دوال التقارير
+// دوال التقارير الجديدة
 // =====================================================
 
 /**
- * عرض تقرير اليوم
+ * عرض تقرير أرصدة الحسابات
  */
-function menuShowTodayReport() {
+function menuShowBalancesReport() {
   try {
-    var report = getDailyReport();
+    var report = generateBalancesReport();
     var ui = SpreadsheetApp.getUi();
 
-    var message = '📊 تقرير اليوم\n';
-    message += '═══════════════════\n\n';
-    message += '💵 إجمالي الدخل: ' + formatNumber(report.totalIncome) + '\n';
-    message += '💸 إجمالي المصروفات: ' + formatNumber(report.totalExpenses) + '\n';
-    message += '📈 صافي اليوم: ' + formatNumber(report.netAmount) + '\n';
-    message += '📝 عدد الحركات: ' + report.transactionCount;
-
-    ui.alert('تقرير اليوم', message, ui.ButtonSet.OK);
-  } catch (error) {
-    SpreadsheetApp.getUi().alert('خطأ', 'حدث خطأ: ' + error.message, SpreadsheetApp.getUi().ButtonSet.OK);
-  }
-}
-
-/**
- * عرض تقرير الأسبوع
- */
-function menuShowWeekReport() {
-  try {
-    var report = getWeeklyReport();
-    var ui = SpreadsheetApp.getUi();
-
-    var message = '📊 تقرير الأسبوع\n';
-    message += '═══════════════════\n\n';
-    message += '💵 إجمالي الدخل: ' + formatNumber(report.totalIncome) + '\n';
-    message += '💸 إجمالي المصروفات: ' + formatNumber(report.totalExpenses) + '\n';
-    message += '📈 صافي الأسبوع: ' + formatNumber(report.netAmount) + '\n';
-    message += '📝 عدد الحركات: ' + report.transactionCount;
-
-    ui.alert('تقرير الأسبوع', message, ui.ButtonSet.OK);
+    // تحويل التنسيق للعرض في alert
+    var cleanReport = report.replace(/\*/g, '').replace(/━/g, '═');
+    ui.alert('تقرير أرصدة الحسابات', cleanReport, ui.ButtonSet.OK);
   } catch (error) {
     SpreadsheetApp.getUi().alert('خطأ', 'حدث خطأ: ' + error.message, SpreadsheetApp.getUi().ButtonSet.OK);
   }
@@ -113,17 +94,26 @@ function menuShowWeekReport() {
  */
 function menuShowMonthReport() {
   try {
-    var report = getMonthlyReport();
+    var report = generateMonthlySummary();
     var ui = SpreadsheetApp.getUi();
 
-    var message = '📊 تقرير الشهر\n';
-    message += '═══════════════════\n\n';
-    message += '💵 إجمالي الدخل: ' + formatNumber(report.totalIncome) + '\n';
-    message += '💸 إجمالي المصروفات: ' + formatNumber(report.totalExpenses) + '\n';
-    message += '📈 صافي الشهر: ' + formatNumber(report.netAmount) + '\n';
-    message += '📝 عدد الحركات: ' + report.transactionCount;
+    var cleanReport = report.replace(/\*/g, '').replace(/━/g, '═');
+    ui.alert('تقرير الشهر', cleanReport, ui.ButtonSet.OK);
+  } catch (error) {
+    SpreadsheetApp.getUi().alert('خطأ', 'حدث خطأ: ' + error.message, SpreadsheetApp.getUi().ButtonSet.OK);
+  }
+}
 
-    ui.alert('تقرير الشهر', message, ui.ButtonSet.OK);
+/**
+ * عرض التقرير الشامل
+ */
+function menuShowComprehensiveReport() {
+  try {
+    var report = generateComprehensiveReport();
+    var ui = SpreadsheetApp.getUi();
+
+    var cleanReport = report.replace(/\*/g, '').replace(/━/g, '═');
+    ui.alert('التقرير الشامل', cleanReport, ui.ButtonSet.OK);
   } catch (error) {
     SpreadsheetApp.getUi().alert('خطأ', 'حدث خطأ: ' + error.message, SpreadsheetApp.getUi().ButtonSet.OK);
   }
@@ -137,147 +127,203 @@ function menuShowCustomReport() {
 
   var response = ui.prompt(
     'تقرير مخصص',
-    'أدخل تاريخ البداية (YYYY-MM-DD):',
+    'أدخل رقم الشهر (1-12):',
     ui.ButtonSet.OK_CANCEL
   );
 
   if (response.getSelectedButton() !== ui.Button.OK) return;
-  var startDate = response.getResponseText();
+  var month = parseInt(response.getResponseText());
 
   response = ui.prompt(
     'تقرير مخصص',
-    'أدخل تاريخ النهاية (YYYY-MM-DD):',
+    'أدخل السنة (مثال: 2025):',
     ui.ButtonSet.OK_CANCEL
   );
 
   if (response.getSelectedButton() !== ui.Button.OK) return;
-  var endDate = response.getResponseText();
+  var year = parseInt(response.getResponseText());
 
   try {
-    var report = getCustomReport(startDate, endDate);
-
-    var message = '📊 تقرير مخصص\n';
-    message += 'من ' + startDate + ' إلى ' + endDate + '\n';
-    message += '═══════════════════\n\n';
-    message += '💵 إجمالي الدخل: ' + formatNumber(report.totalIncome) + '\n';
-    message += '💸 إجمالي المصروفات: ' + formatNumber(report.totalExpenses) + '\n';
-    message += '📈 الصافي: ' + formatNumber(report.netAmount) + '\n';
-    message += '📝 عدد الحركات: ' + report.transactionCount;
-
-    ui.alert('تقرير مخصص', message, ui.ButtonSet.OK);
+    var report = generateMonthlySummary(month, year);
+    var cleanReport = report.replace(/\*/g, '').replace(/━/g, '═');
+    ui.alert('تقرير مخصص', cleanReport, ui.ButtonSet.OK);
   } catch (error) {
     ui.alert('خطأ', 'حدث خطأ: ' + error.message, ui.ButtonSet.OK);
   }
 }
 
 // =====================================================
-// دوال العهدة
+// دوال الحسابات
 // =====================================================
 
 /**
- * تحديث تقرير عهدة سارة
+ * عرض جميع الحسابات
  */
-function menuUpdateSaraCustody() {
+function menuShowAllAccounts() {
   var ui = SpreadsheetApp.getUi();
 
   try {
-    ui.alert('جاري التحديث...', 'يتم تحديث تقرير عهدة سارة، انتظر قليلاً...', ui.ButtonSet.OK);
+    var accounts = getAllAccounts();
 
-    var result = updateCustodyReportSheet('سارة');
-
-    if (result.success) {
-      var message = '✅ تم تحديث تقرير عهدة سارة\n\n';
-      message += '📝 عدد الحركات: ' + result.transactions_count + '\n';
-      message += '💰 إجمالي الإيداعات: ' + formatNumber(result.total_deposits) + '\n';
-      message += '💸 إجمالي المصروفات: ' + formatNumber(result.total_expenses) + '\n';
-      message += '📊 الرصيد الحالي: ' + formatNumber(result.balance);
-
-      ui.alert('نجاح', message, ui.ButtonSet.OK);
-    } else {
-      ui.alert('خطأ', result.message, ui.ButtonSet.OK);
+    if (!accounts || accounts.length === 0) {
+      ui.alert('الحسابات', 'لا توجد حسابات مسجلة.', ui.ButtonSet.OK);
+      return;
     }
-  } catch (error) {
-    ui.alert('خطأ', 'حدث خطأ: ' + error.message, ui.ButtonSet.OK);
-  }
-}
 
-/**
- * تحديث تقرير عهدة مصطفى
- */
-function menuUpdateMostafaCustody() {
-  var ui = SpreadsheetApp.getUi();
+    var message = '💰 الحسابات المسجلة\n';
+    message += '═══════════════════════════\n\n';
 
-  try {
-    var result = updateCustodyReportSheet('مصطفى');
+    // Group by type
+    var accountsByType = {};
+    accounts.forEach(function(acc) {
+      if (!accountsByType[acc.type]) {
+        accountsByType[acc.type] = [];
+      }
+      accountsByType[acc.type].push(acc);
+    });
 
-    if (result.success) {
-      var message = '✅ تم تحديث تقرير عهدة مصطفى\n\n';
-      message += '📝 عدد الحركات: ' + result.transactions_count + '\n';
-      message += '💰 إجمالي الإيداعات: ' + formatNumber(result.total_deposits) + '\n';
-      message += '💸 إجمالي المصروفات: ' + formatNumber(result.total_expenses) + '\n';
-      message += '📊 الرصيد الحالي: ' + formatNumber(result.balance);
-
-      ui.alert('نجاح', message, ui.ButtonSet.OK);
-    } else {
-      ui.alert('خطأ', result.message, ui.ButtonSet.OK);
+    for (var type in accountsByType) {
+      message += '📋 ' + type + ':\n';
+      accountsByType[type].forEach(function(acc) {
+        var balance = calculateAccountBalance(acc.code);
+        message += '   • ' + acc.name + ' (' + acc.code + ')';
+        if (balance.SAR !== 0) message += ' - ' + formatNumber(balance.SAR) + ' ر.س';
+        if (balance.EGP !== 0) message += ' - ' + formatNumber(balance.EGP) + ' ج.م';
+        message += '\n';
+      });
+      message += '\n';
     }
+
+    ui.alert('الحسابات', message, ui.ButtonSet.OK);
   } catch (error) {
     ui.alert('خطأ', 'حدث خطأ: ' + error.message, ui.ButtonSet.OK);
   }
 }
 
 /**
- * تحديث جميع تقارير العهدة
+ * عرض كشف حساب معين
  */
-function menuUpdateAllCustody() {
+function menuShowAccountStatement() {
   var ui = SpreadsheetApp.getUi();
 
   try {
-    var result = updateAllCustodyReports();
+    var accounts = getAllAccounts();
 
-    if (result.success) {
-      var message = '✅ تم تحديث جميع تقارير العهدة\n\n';
+    // عرض قائمة الحسابات
+    var accList = accounts.map(function(a, i) {
+      return (i + 1) + '. ' + a.name + ' (' + a.code + ')';
+    }).join('\n');
 
-      message += '👩 سارة:\n';
-      message += '   الرصيد: ' + formatNumber(result.sara.balance) + '\n';
-      message += '   الحركات: ' + result.sara.transactions_count + '\n\n';
+    var response = ui.prompt(
+      'كشف حساب',
+      'اختر رقم الحساب:\n' + accList,
+      ui.ButtonSet.OK_CANCEL
+    );
 
-      message += '👨 مصطفى:\n';
-      message += '   الرصيد: ' + formatNumber(result.mostafa.balance) + '\n';
-      message += '   الحركات: ' + result.mostafa.transactions_count;
-
-      ui.alert('نجاح', message, ui.ButtonSet.OK);
-    } else {
-      ui.alert('خطأ', result.message, ui.ButtonSet.OK);
+    if (response.getSelectedButton() !== ui.Button.OK) return;
+    var accIndex = parseInt(response.getResponseText()) - 1;
+    if (accIndex < 0 || accIndex >= accounts.length) {
+      ui.alert('خطأ', 'رقم غير صحيح', ui.ButtonSet.OK);
+      return;
     }
+
+    var selectedAccount = accounts[accIndex];
+    var report = generateAccountStatement(selectedAccount.code);
+    var cleanReport = report.replace(/\*/g, '').replace(/━/g, '═');
+    ui.alert('كشف حساب: ' + selectedAccount.name, cleanReport, ui.ButtonSet.OK);
+
   } catch (error) {
     ui.alert('خطأ', 'حدث خطأ: ' + error.message, ui.ButtonSet.OK);
   }
 }
 
 /**
- * عرض رصيد سارة
+ * عرض تقرير حسابات العهدة
  */
-function menuShowSaraBalance() {
-  var ui = SpreadsheetApp.getUi();
-
+function menuShowCustodyReport() {
   try {
-    var balance = calculateCustodyBalanceFromTransactions('سارة');
-    ui.alert('رصيد عهدة سارة', '💰 الرصيد الحالي: ' + formatNumber(balance) + ' جنيه', ui.ButtonSet.OK);
+    var report = generateCustodyReport();
+    var ui = SpreadsheetApp.getUi();
+
+    var cleanReport = report.replace(/\*/g, '').replace(/━/g, '═');
+    ui.alert('تقرير حسابات العهدة', cleanReport, ui.ButtonSet.OK);
   } catch (error) {
-    ui.alert('خطأ', 'حدث خطأ: ' + error.message, ui.ButtonSet.OK);
+    SpreadsheetApp.getUi().alert('خطأ', 'حدث خطأ: ' + error.message, SpreadsheetApp.getUi().ButtonSet.OK);
   }
 }
 
 /**
- * عرض رصيد مصطفى
+ * عرض تقرير المدخرات
  */
-function menuShowMostafaBalance() {
+function menuShowSavingsReport() {
+  try {
+    var report = generateSavingsReport();
+    var ui = SpreadsheetApp.getUi();
+
+    var cleanReport = report.replace(/\*/g, '').replace(/━/g, '═');
+    ui.alert('تقرير المدخرات', cleanReport, ui.ButtonSet.OK);
+  } catch (error) {
+    SpreadsheetApp.getUi().alert('خطأ', 'حدث خطأ: ' + error.message, SpreadsheetApp.getUi().ButtonSet.OK);
+  }
+}
+
+/**
+ * عرض تقرير الاستثمارات
+ */
+function menuShowInvestmentsReport() {
+  try {
+    var report = generateInvestmentsReport();
+    var ui = SpreadsheetApp.getUi();
+
+    var cleanReport = report.replace(/\*/g, '').replace(/━/g, '═');
+    ui.alert('تقرير الاستثمارات', cleanReport, ui.ButtonSet.OK);
+  } catch (error) {
+    SpreadsheetApp.getUi().alert('خطأ', 'حدث خطأ: ' + error.message, SpreadsheetApp.getUi().ButtonSet.OK);
+  }
+}
+
+/**
+ * عرض رصيد حساب معين
+ */
+function menuShowSpecificAccountBalance() {
   var ui = SpreadsheetApp.getUi();
 
   try {
-    var balance = calculateCustodyBalanceFromTransactions('مصطفى');
-    ui.alert('رصيد عهدة مصطفى', '💰 الرصيد الحالي: ' + formatNumber(balance) + ' جنيه', ui.ButtonSet.OK);
+    var accounts = getAllAccounts();
+
+    // عرض قائمة الحسابات
+    var accList = accounts.map(function(a, i) {
+      return (i + 1) + '. ' + a.name;
+    }).join('\n');
+
+    var response = ui.prompt(
+      'عرض رصيد حساب',
+      'اختر رقم الحساب:\n' + accList,
+      ui.ButtonSet.OK_CANCEL
+    );
+
+    if (response.getSelectedButton() !== ui.Button.OK) return;
+    var accIndex = parseInt(response.getResponseText()) - 1;
+    if (accIndex < 0 || accIndex >= accounts.length) {
+      ui.alert('خطأ', 'رقم غير صحيح', ui.ButtonSet.OK);
+      return;
+    }
+
+    var selectedAccount = accounts[accIndex];
+    var balance = calculateAccountBalance(selectedAccount.code);
+
+    var message = '💰 رصيد حساب: ' + selectedAccount.name + '\n';
+    message += '═══════════════════════════\n\n';
+    if (balance.SAR !== 0) message += 'بالريال: ' + formatNumber(balance.SAR) + ' ر.س\n';
+    if (balance.EGP !== 0) message += 'بالجنيه: ' + formatNumber(balance.EGP) + ' ج.م\n';
+    if (balance.USD !== 0) message += 'بالدولار: ' + formatNumber(balance.USD) + ' $\n';
+
+    if (balance.SAR === 0 && balance.EGP === 0 && balance.USD === 0) {
+      message += 'الرصيد: صفر';
+    }
+
+    ui.alert('رصيد الحساب', message, ui.ButtonSet.OK);
+
   } catch (error) {
     ui.alert('خطأ', 'حدث خطأ: ' + error.message, ui.ButtonSet.OK);
   }
@@ -302,13 +348,19 @@ function menuRecalculateBalances() {
   if (response !== ui.Button.YES) return;
 
   try {
-    // إعادة حساب أرصدة العهدة
-    var saraBalance = calculateCustodyBalanceFromTransactions('سارة');
-    var mostafaBalance = calculateCustodyBalanceFromTransactions('مصطفى');
+    var accounts = getAllAccounts();
 
     var message = '✅ تم إعادة حساب الأرصدة\n\n';
-    message += '👩 رصيد سارة: ' + formatNumber(saraBalance) + ' جنيه\n';
-    message += '👨 رصيد مصطفى: ' + formatNumber(mostafaBalance) + ' جنيه';
+
+    accounts.forEach(function(acc) {
+      var balance = calculateAccountBalance(acc.code);
+      if (balance.SAR !== 0 || balance.EGP !== 0) {
+        message += '• ' + acc.name + ': ';
+        if (balance.SAR !== 0) message += formatNumber(balance.SAR) + ' ر.س ';
+        if (balance.EGP !== 0) message += formatNumber(balance.EGP) + ' ج.م';
+        message += '\n';
+      }
+    });
 
     ui.alert('نجاح', message, ui.ButtonSet.OK);
   } catch (error) {
@@ -334,6 +386,37 @@ function menuCleanData() {
     var result = cleanTransactionsData();
 
     ui.alert('نجاح', '✅ تم تنظيف البيانات\n\nتم معالجة ' + result.rowsProcessed + ' صف', ui.ButtonSet.OK);
+  } catch (error) {
+    ui.alert('خطأ', 'حدث خطأ: ' + error.message, ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * عرض معلومات النظام
+ */
+function menuShowSystemInfo() {
+  var ui = SpreadsheetApp.getUi();
+
+  try {
+    var accounts = getAllAccounts();
+    var items = getAllItems();
+
+    var message = '═══════════════════════════\n';
+    message += '    معلومات النظام\n';
+    message += '═══════════════════════════\n\n';
+    message += '📌 الإصدار: 2.0.0 (القيد المزدوج)\n';
+    message += '📅 التاريخ: 2025\n\n';
+    message += '📊 الإحصائيات:\n';
+    message += '   • عدد الحسابات: ' + accounts.length + '\n';
+    message += '   • عدد البنود: ' + items.length + '\n\n';
+    message += '🔹 نظام القيد المزدوج\n';
+    message += '🔹 تتبع أرصدة الحسابات\n';
+    message += '🔹 التحويلات بين الحسابات\n';
+    message += '🔹 تحويل العملات\n';
+    message += '🔹 بوت تليجرام ذكي\n\n';
+    message += '═══════════════════════════';
+
+    ui.alert('معلومات النظام', message, ui.ButtonSet.OK);
   } catch (error) {
     ui.alert('خطأ', 'حدث خطأ: ' + error.message, ui.ButtonSet.OK);
   }
@@ -384,13 +467,16 @@ function menuShowAbout() {
 
   var message = '═══════════════════════════\n';
   message += '    نظام محمود المحاسبي\n';
+  message += '    الإصدار 2.0\n';
   message += '═══════════════════════════\n\n';
-  message += '📌 الإصدار: 2.0\n';
+  message += '📌 الإصدار: 2.0.0 (القيد المزدوج)\n';
   message += '📅 التاريخ: 2025\n\n';
-  message += '🔹 تتبع المصروفات والدخل\n';
-  message += '🔹 إدارة العهدة (سارة ومصطفى)\n';
-  message += '🔹 تقارير يومية وأسبوعية وشهرية\n';
-  message += '🔹 بوت تليجرام للتسجيل السريع\n\n';
+  message += '🔹 نظام القيد المزدوج (Double Entry)\n';
+  message += '🔹 كل حركة لها من_حساب وإلى_حساب\n';
+  message += '🔹 تتبع أرصدة جميع الحسابات\n';
+  message += '🔹 دعم عملات متعددة (ريال/جنيه/دولار)\n';
+  message += '🔹 بوت تليجرام ذكي مع Gemini AI\n';
+  message += '🔹 تقارير شاملة ومفصلة\n\n';
   message += '═══════════════════════════';
 
   ui.alert('حول النظام', message, ui.ButtonSet.OK);
@@ -462,91 +548,6 @@ function cleanTransactionsData() {
   }
 
   return { rowsProcessed: rowsProcessed };
-}
-
-// =====================================================
-// دوال التقارير (إذا لم تكن موجودة)
-// =====================================================
-
-/**
- * الحصول على تقرير اليوم
- */
-function getDailyReport() {
-  var today = new Date();
-  var todayStr = Utilities.formatDate(today, 'Asia/Riyadh', 'yyyy-MM-dd');
-  return getReportForDateRange(todayStr, todayStr);
-}
-
-/**
- * الحصول على تقرير الأسبوع
- */
-function getWeeklyReport() {
-  var today = new Date();
-  var weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
-  var todayStr = Utilities.formatDate(today, 'Asia/Riyadh', 'yyyy-MM-dd');
-  var weekAgoStr = Utilities.formatDate(weekAgo, 'Asia/Riyadh', 'yyyy-MM-dd');
-  return getReportForDateRange(weekAgoStr, todayStr);
-}
-
-/**
- * الحصول على تقرير الشهر
- */
-function getMonthlyReport() {
-  var today = new Date();
-  var monthAgo = new Date(today.getFullYear(), today.getMonth(), 1);
-  var todayStr = Utilities.formatDate(today, 'Asia/Riyadh', 'yyyy-MM-dd');
-  var monthAgoStr = Utilities.formatDate(monthAgo, 'Asia/Riyadh', 'yyyy-MM-dd');
-  return getReportForDateRange(monthAgoStr, todayStr);
-}
-
-/**
- * الحصول على تقرير مخصص
- */
-function getCustomReport(startDate, endDate) {
-  return getReportForDateRange(startDate, endDate);
-}
-
-/**
- * الحصول على تقرير لفترة معينة
- */
-function getReportForDateRange(startDate, endDate) {
-  var sheet = getOrCreateSheet(SHEETS.TRANSACTIONS);
-  var data = sheet.getDataRange().getValues();
-
-  var totalIncome = 0;
-  var totalExpenses = 0;
-  var transactionCount = 0;
-
-  var start = new Date(startDate);
-  var end = new Date(endDate);
-  end.setHours(23, 59, 59);
-
-  // Headers: ID, التاريخ, الوقت, النوع, التصنيف, المبلغ, ...
-  for (var i = 1; i < data.length; i++) {
-    var dateCell = data[i][1];
-    if (!dateCell) continue;
-
-    var rowDate = new Date(dateCell);
-    if (rowDate < start || rowDate > end) continue;
-
-    var type = data[i][3];
-    var amount = parseFloat(data[i][5]) || 0;
-
-    transactionCount++;
-
-    if (type === 'دخل' || type === 'إيداع_عهدة') {
-      totalIncome += amount;
-    } else if (type === 'مصروف' || type === 'صرف_من_عهدة') {
-      totalExpenses += amount;
-    }
-  }
-
-  return {
-    totalIncome: totalIncome,
-    totalExpenses: totalExpenses,
-    netAmount: totalIncome - totalExpenses,
-    transactionCount: transactionCount
-  };
 }
 
 // =====================================================
@@ -629,7 +630,6 @@ function menuAddNewAssociation() {
     });
 
     if (result.success) {
-      // حساب تاريخ القبض المتوقع
       var currentYear = new Date().getFullYear();
       var collectionMonth = startMonth + collectionOrder - 1;
       var collectionYear = currentYear;
@@ -668,7 +668,6 @@ function menuRecordInstallmentPayment() {
       return;
     }
 
-    // عرض قائمة الجمعيات
     var assocList = associations.map(function(a, i) { return (i + 1) + '. ' + a.name; }).join('\n');
     var response = ui.prompt(
       'تسجيل دفعة قسط',
@@ -685,7 +684,6 @@ function menuRecordInstallmentPayment() {
 
     var selectedAssoc = associations[assocIndex];
 
-    // تأكيد الدفعة
     var confirm = ui.alert(
       'تأكيد',
       'هل تريد تسجيل دفعة قسط بقيمة ' + formatNumber(selectedAssoc.installment) + ' لجمعية "' + selectedAssoc.name + '"؟',
@@ -724,7 +722,6 @@ function menuRecordAssociationCollection() {
       return;
     }
 
-    // عرض قائمة الجمعيات
     var assocList = associations.map(function(a, i) {
       return (i + 1) + '. ' + a.name + ' (المبلغ: ' + formatNumber(a.installment * a.duration) + ')';
     }).join('\n');
@@ -773,38 +770,14 @@ function menuRecordAssociationCollection() {
  * تقرير الجمعيات
  */
 function menuShowAssociationsReport() {
-  var ui = SpreadsheetApp.getUi();
-
   try {
-    var report = getAssociationsReport();
+    var report = generateAssociationsReport();
+    var ui = SpreadsheetApp.getUi();
 
-    if (!report || report.associations.length === 0) {
-      ui.alert('تقرير الجمعيات', 'لا توجد جمعيات مسجلة حالياً.', ui.ButtonSet.OK);
-      return;
-    }
-
-    var message = '📊 تقرير الجمعيات\n';
-    message += '═══════════════════════════\n\n';
-
-    report.associations.forEach(function(assoc) {
-      var progress = Math.round((assoc.paidInstallments / assoc.duration) * 100);
-      var progressBar = '[' + '▓'.repeat(Math.floor(progress / 10)) + '░'.repeat(10 - Math.floor(progress / 10)) + ']';
-
-      message += '📋 ' + assoc.name + '\n';
-      message += '   ' + progressBar + ' ' + progress + '%\n';
-      message += '   💰 المدفوع: ' + formatNumber(assoc.totalPaid) + ' / ' + formatNumber(assoc.totalAmount) + '\n';
-      message += '   📅 الأقساط: ' + assoc.paidInstallments + ' / ' + assoc.duration + '\n';
-      message += '   🎯 موعد القبض: ' + assoc.collectionDate + '\n';
-      message += '   📊 الحالة: ' + (assoc.collected ? '✅ تم القبض' : '⏳ لم يتم القبض بعد') + '\n\n';
-    });
-
-    message += '═══════════════════════════\n';
-    message += '💵 إجمالي المدفوع: ' + formatNumber(report.totalPaid) + '\n';
-    message += '💰 إجمالي المتوقع قبضه: ' + formatNumber(report.totalExpected);
-
-    ui.alert('تقرير الجمعيات', message, ui.ButtonSet.OK);
+    var cleanReport = report.replace(/\*/g, '').replace(/━/g, '═');
+    ui.alert('تقرير الجمعيات', cleanReport, ui.ButtonSet.OK);
   } catch (error) {
-    ui.alert('خطأ', 'حدث خطأ: ' + error.message, ui.ButtonSet.OK);
+    SpreadsheetApp.getUi().alert('خطأ', 'حدث خطأ: ' + error.message, SpreadsheetApp.getUi().ButtonSet.OK);
   }
 }
 
@@ -854,7 +827,6 @@ function menuShowBackupStatus() {
 function menuSetupDailyBackup() {
   var ui = SpreadsheetApp.getUi();
 
-  // طلب كلمة السر
   var passwordResponse = ui.prompt(
     '🔐 كلمة السر',
     'أدخل كلمة السر لتفعيل النسخ الاحتياطي التلقائي:',
@@ -883,7 +855,6 @@ function menuSetupDailyBackup() {
 function menuCancelDailyBackup() {
   var ui = SpreadsheetApp.getUi();
 
-  // طلب كلمة السر
   var passwordResponse = ui.prompt(
     '🔐 كلمة السر',
     'أدخل كلمة السر لإلغاء النسخ الاحتياطي التلقائي:',
