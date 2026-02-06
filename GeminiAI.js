@@ -47,8 +47,16 @@ function parseCompoundTransactionLocally(message) {
   };
 
   // ⭐ نمط "من X الي Y مبلغ" - أكثر مرونة
+  // نمط 1: "من مصطفي الي مراتي 4000" (الي/إلى منفصلة)
+  // نمط 2: "من مصطفي لمراتي 4000" (ل ملتصقة بالاسم)
   var transferPattern = /من\s+(\S+)\s+(?:الي|الى|إلى|ل|لـ)\s+(\S+)\s+(\d+)/i;
   var transferMatch = text.match(transferPattern);
+
+  // ⭐ نمط إضافي: "من X لY مبلغ" (ل ملتصقة بالاسم بدون مسافة)
+  if (!transferMatch) {
+    var attachedPattern = /من\s+(\S+)\s+ل(\S+)\s+(\d+)/i;
+    transferMatch = text.match(attachedPattern);
+  }
 
   Logger.log('Transfer pattern test: ' + (transferMatch ? 'MATCHED' : 'NO MATCH'));
 
