@@ -454,6 +454,26 @@ function addTransactionsDropdowns() {
     .build();
   sheet.getRange(2, 4, lastRow, 1).setDataValidation(natureRule);
 
+  // ⭐ عمود التصنيف (5) - من شيت البنود
+  const categories = getUniqueCategoriesFromItems();
+  if (categories.length > 0) {
+    const categoryRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(categories, true)
+      .setAllowInvalid(true)  // السماح بقيم أخرى
+      .build();
+    sheet.getRange(2, 5, lastRow, 1).setDataValidation(categoryRule);
+  }
+
+  // ⭐ عمود البند (6) - من شيت البنود
+  const items = getUniqueItemsFromItems();
+  if (items.length > 0) {
+    const itemRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(items, true)
+      .setAllowInvalid(true)  // السماح بقيم أخرى
+      .build();
+    sheet.getRange(2, 6, lastRow, 1).setDataValidation(itemRule);
+  }
+
   // عمود العملة (8)
   const currencyRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(DROPDOWN_LISTS.currencies, true)
@@ -461,8 +481,87 @@ function addTransactionsDropdowns() {
     .build();
   sheet.getRange(2, 8, lastRow, 1).setDataValidation(currencyRule);
 
+  // ⭐ عمود من_حساب (9) - من شيت الحسابات
+  const accountCodes = getAccountCodesForDropdown();
+  if (accountCodes.length > 0) {
+    const accountRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(accountCodes, true)
+      .setAllowInvalid(true)  // السماح بالفراغ
+      .build();
+    sheet.getRange(2, 9, lastRow, 1).setDataValidation(accountRule);
+
+    // ⭐ عمود إلى_حساب (10)
+    sheet.getRange(2, 10, lastRow, 1).setDataValidation(accountRule);
+  }
+
   // عمود عملة التحويل (12)
   sheet.getRange(2, 12, lastRow, 1).setDataValidation(currencyRule);
+}
+
+/**
+ * الحصول على التصنيفات الفريدة من شيت البنود
+ */
+function getUniqueCategoriesFromItems() {
+  try {
+    const sheet = getOrCreateSheet(SHEETS.ITEMS);
+    const data = sheet.getDataRange().getValues();
+    const categories = new Set();
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][1]) {  // عمود التصنيف
+        categories.add(data[i][1]);
+      }
+    }
+
+    return Array.from(categories);
+  } catch (e) {
+    Logger.log('Error getting categories: ' + e.toString());
+    return [];
+  }
+}
+
+/**
+ * الحصول على البنود الفريدة من شيت البنود
+ */
+function getUniqueItemsFromItems() {
+  try {
+    const sheet = getOrCreateSheet(SHEETS.ITEMS);
+    const data = sheet.getDataRange().getValues();
+    const items = new Set();
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][2]) {  // عمود البند
+        items.add(data[i][2]);
+      }
+    }
+
+    return Array.from(items);
+  } catch (e) {
+    Logger.log('Error getting items: ' + e.toString());
+    return [];
+  }
+}
+
+/**
+ * الحصول على أكواد الحسابات للقوائم المنسدلة
+ */
+function getAccountCodesForDropdown() {
+  try {
+    const sheet = getOrCreateSheet(SHEETS.ACCOUNTS);
+    const data = sheet.getDataRange().getValues();
+    const codes = [];
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] && data[i][8] === 'نعم') {  // الكود + نشط
+        codes.push(data[i][0]);  // الكود فقط
+      }
+    }
+
+    return codes;
+  } catch (e) {
+    Logger.log('Error getting account codes: ' + e.toString());
+    return [];
+  }
 }
 
 /**
