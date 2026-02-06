@@ -385,8 +385,8 @@ function parseMessageWithGemini(userMessage, userName) {
     var parsedData = JSON.parse(jsonMatch[0]);
     Logger.log('Parsed data: ' + JSON.stringify(parsedData));
 
-    // تحويل البيانات للتنسيق الموحد
-    var normalizedData = normalizeAIResponse(parsedData);
+    // تحويل البيانات للتنسيق الموحد مع تمرير الرسالة الأصلية لتصحيح الحسابات
+    var normalizedData = normalizeAIResponse(parsedData, userMessage);
 
     Logger.log('=== parseMessageWithGemini END ===');
     return normalizedData;
@@ -406,7 +406,7 @@ function parseMessageWithGemini(userMessage, userName) {
 /**
  * تطبيع استجابة الذكاء الاصطناعي للتنسيق الموحد
  */
-function normalizeAIResponse(data) {
+function normalizeAIResponse(data, originalMessage) {
   // التحقق من نجاح التحليل
   const success = data.نجاح === true || data.success === true;
 
@@ -421,8 +421,12 @@ function normalizeAIResponse(data) {
     };
   }
 
+  // ⭐ تحليل الرسالة الأصلية لاستخراج الحسابات الصحيحة
+  var msgAccounts = extractAccountsFromOriginalMessage(originalMessage || '');
+  Logger.log('Extracted accounts from original: ' + JSON.stringify(msgAccounts));
+
   // تحويل المعاملات
-  const transactions = (data.معاملات || data.transactions || []).map(t => {
+  var transactions = (data.معاملات || data.transactions || []).map(function(t, index) {
     var trans = {
       nature: t.طبيعة || t.nature || t.نوع || t.type || '',
       category: t.تصنيف || t.category || '',
@@ -444,7 +448,33 @@ function normalizeAIResponse(data) {
       exchange_rate: parseFloat(t.سعر_صرف || t.سعر_الصرف || t.exchangeRate || t.exchange_rate) || null
     };
 
-    // ⭐⭐⭐ استخراج الحسابات من الوصف إذا كانت فارغة ⭐⭐⭐
+    // ⭐⭐⭐ تصحيح التصنيفات المخترعة ⭐⭐⭐
+    trans = fixCategory(trans);
+
+    // ⭐⭐⭐ تصحيح الحسابات ⭐⭐⭐
+    // للمعاملة الأولى (التحويل الرئيسي)
+    if (index === 0 && msgAccounts.fromAccount && (trans.nature === 'تحويل' || trans.type === 'تحويل')) {
+      if (trans.fromAccount === 'MAIN' || !trans.fromAccount) {
+        trans.fromAccount = msgAccounts.fromAccount;
+        trans.from_account = msgAccounts.fromAccount;
+      }
+      if (!trans.toAccount && msgAccounts.toAccount) {
+        trans.toAccount = msgAccounts.toAccount;
+        trans.to_account = msgAccounts.toAccount;
+      }
+    }
+
+    // للمعاملات اللاحقة (صرف من المستلم)
+    if (index > 0 && msgAccounts.toAccount) {
+      // إذا كانت الحركة مصروف والحساب MAIN خطأ
+      if ((trans.nature === 'مصروف' || trans.type === 'مصروف') &&
+          (trans.fromAccount === 'MAIN' || !trans.fromAccount)) {
+        trans.fromAccount = msgAccounts.toAccount;
+        trans.from_account = msgAccounts.toAccount;
+      }
+    }
+
+    // استخراج إضافي من الوصف
     if ((trans.nature === 'تحويل' || trans.type === 'تحويل') && (!trans.fromAccount || !trans.toAccount)) {
       var extracted = extractAccountsFromDescription(trans.description);
       if (extracted.fromAccount && !trans.fromAccount) {
@@ -515,6 +545,165 @@ function extractAccountsFromDescription(description) {
 
   Logger.log('Extracted: from=' + result.fromAccount + ', to=' + result.toAccount);
   return result;
+}
+
+/**
+ * ⭐⭐⭐ استخراج الحسابات من الرسالة الأصلية ⭐⭐⭐
+ * يحلل نمط "من X الي/لـ Y" بشكل مباشر
+ */
+function extractAccountsFromOriginalMessage(message) {
+  var result = { fromAccount: '', toAccount: '' };
+  if (!message) return result;
+
+  // تحويل الأرقام العربية وتنظيف النص
+  var text = convertArabicToWesternNumerals(message);
+  text = text.replace(/[\u064B-\u065F]/g, ''); // إزالة التشكيل
+
+  Logger.log('Extracting accounts from: ' + text);
+
+  // قاموس الأسماء والحسابات الموسع
+  var nameToAccount = {
+    'مصطفى': 'MOSTAFA', 'مصطفي': 'MOSTAFA', 'مصطفا': 'MOSTAFA',
+    'سارة': 'SARA', 'ساره': 'SARA', 'سارا': 'SARA',
+    'مراتي': 'WIFE', 'زوجتي': 'WIFE', 'الزوجة': 'WIFE', 'الزوجه': 'WIFE',
+    'ام سيليا': 'WIFE', 'أم سيليا': 'WIFE', 'ام سيلا': 'WIFE',
+    'هاجر': 'HAGAR', 'هاجير': 'HAGAR',
+    'محمد': 'MOHAMED', 'محمود': 'MOHAMED',
+    'حسابي': 'MAIN', 'الرئيسي': 'MAIN', 'الخزنة': 'MAIN', 'عندي': 'MAIN'
+  };
+
+  // ⭐ نمط "من X الي/لـ Y" - الأهم
+  var transferPattern = /من\s+([^\s,،]+)\s+(?:الي|الى|إلى|ل|لـ)\s+([^\s,،0-9]+)/i;
+  var transferMatch = text.match(transferPattern);
+
+  if (transferMatch) {
+    var fromName = transferMatch[1].trim();
+    var toName = transferMatch[2].trim();
+
+    Logger.log('Transfer pattern found: from=' + fromName + ', to=' + toName);
+
+    // البحث عن الحساب المصدر
+    for (var key in nameToAccount) {
+      if (fromName.indexOf(key) !== -1 || key.indexOf(fromName) !== -1) {
+        result.fromAccount = nameToAccount[key];
+        Logger.log('From account matched: ' + key + ' -> ' + result.fromAccount);
+        break;
+      }
+    }
+
+    // البحث عن الحساب الوجهة
+    for (var key2 in nameToAccount) {
+      if (toName.indexOf(key2) !== -1 || key2.indexOf(toName) !== -1) {
+        result.toAccount = nameToAccount[key2];
+        Logger.log('To account matched: ' + key2 + ' -> ' + result.toAccount);
+        break;
+      }
+    }
+  }
+
+  // ⭐ نمط بديل: "حولت لـ X" أو "لـ X"
+  if (!result.toAccount) {
+    var toPattern = /(?:حولت?|ارسلت?|بعثت?)\s*(?:ل|لـ|الي|الى|إلى)\s*([^\s,،0-9]+)/i;
+    var toMatch = text.match(toPattern);
+    if (toMatch) {
+      var name = toMatch[1].trim();
+      for (var k in nameToAccount) {
+        if (name.indexOf(k) !== -1 || k.indexOf(name) !== -1) {
+          result.toAccount = nameToAccount[k];
+          break;
+        }
+      }
+      // إذا كان "حولت لـ" بدون "من" فالمصدر هو MAIN
+      if (result.toAccount && !result.fromAccount) {
+        result.fromAccount = 'MAIN';
+      }
+    }
+  }
+
+  Logger.log('Final extracted: from=' + result.fromAccount + ', to=' + result.toAccount);
+  return result;
+}
+
+/**
+ * ⭐⭐⭐ تصحيح التصنيفات المخترعة ⭐⭐⭐
+ */
+function fixCategory(trans) {
+  // قائمة التصنيفات المسموحة
+  var validCategories = [
+    'راتب', 'دخل إضافي', 'مكافأة', 'استثمار', 'هدية',
+    'معيشة', 'طعام', 'مواصلات', 'صحة', 'تعليم', 'ترفيه', 'ملابس', 'اتصالات',
+    'سكن', 'خدمات', 'تأمين', 'ضرائب',
+    'عهدة', 'جمعية', 'سلف', 'ذهب', 'ادخار',
+    'بنك', 'تحويل'
+  ];
+
+  // قائمة البنود المسموحة
+  var validItems = [
+    'راتب أساسي', 'راتب إضافي', 'مكافأة', 'عمولة', 'دخل استثمار', 'إيجار مستلم',
+    'طعام وشراب', 'مصروفات منزلية', 'كهرباء', 'ماء', 'غاز', 'إنترنت', 'هاتف',
+    'بنزين', 'مواصلات عامة', 'صيانة سيارة',
+    'أدوية', 'طبيب', 'مستشفى',
+    'مصاريف دراسية', 'كتب', 'دورات',
+    'تحويل لعهدة', 'تحويل من عهدة', 'تحويل بين عهد',
+    'قسط جمعية', 'قبض جمعية',
+    'شراء ذهب', 'بيع ذهب',
+    'إيداع ادخار', 'سحب ادخار',
+    'سلفة مُعطاة', 'سلفة مُستلمة', 'سداد سلفة'
+  ];
+
+  var category = trans.category || '';
+  var item = trans.item || '';
+
+  // ⭐ إصلاح "تحويل عهدة" أو "تحويل عهده" -> "عهدة"
+  if (category.indexOf('تحويل') !== -1 && category.indexOf('عهد') !== -1) {
+    trans.category = 'عهدة';
+    if (!item || item.indexOf('تحويل') !== -1) {
+      trans.item = 'تحويل بين عهد';
+    }
+    Logger.log('Fixed category: تحويل عهدة -> عهدة');
+  }
+
+  // ⭐ إصلاح "عهدة X" -> "عهدة"
+  if (category.indexOf('عهدة') !== -1 || category.indexOf('عهده') !== -1) {
+    trans.category = 'عهدة';
+  }
+
+  // ⭐ إصلاح تصنيفات الجمعية
+  if (category.indexOf('جمعي') !== -1) {
+    trans.category = 'جمعية';
+    if (!item || trans.nature === 'مصروف') {
+      trans.item = 'قسط جمعية';
+    } else if (trans.nature === 'إيراد') {
+      trans.item = 'قبض جمعية';
+    }
+  }
+
+  // ⭐ إصلاح "مصروفات" -> "معيشة"
+  if (category === 'مصروفات' || category === 'مصروف') {
+    trans.category = 'معيشة';
+    if (!item) {
+      trans.item = 'مصروفات منزلية';
+    }
+  }
+
+  // ⭐ التحقق من صحة التصنيف
+  var isValidCategory = validCategories.some(function(c) {
+    return category.indexOf(c) !== -1 || c.indexOf(category) !== -1;
+  });
+
+  if (!isValidCategory && category) {
+    // محاولة إيجاد أقرب تصنيف
+    if (trans.nature === 'تحويل') {
+      trans.category = 'عهدة';
+    } else if (trans.nature === 'مصروف') {
+      trans.category = 'معيشة';
+    } else if (trans.nature === 'إيراد') {
+      trans.category = 'دخل إضافي';
+    }
+    Logger.log('Fixed invalid category: ' + category + ' -> ' + trans.category);
+  }
+
+  return trans;
 }
 
 /**
