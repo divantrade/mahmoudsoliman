@@ -60,10 +60,215 @@ function parseCompoundTransactionLocally(message) {
 
   Logger.log('Transfer pattern test: ' + (transferMatch ? 'MATCHED' : 'NO MATCH'));
 
+  // ⭐⭐⭐ نمط 3: "حولت ل[شخص] [مبلغ] ريال ما يعادل [مبلغ] جنيه" ⭐⭐⭐
+  var isCustodyCompound = false;
+  var custodyAccount = null;
+  var custodyName = '';
+  var amountSAR = 0;
+  var amountEGP = 0;
+
   if (!transferMatch) {
+    // "حولت لمصطفي 800 ريال ما يعادل 9921 جنيه ياخد منهم..."
+    var custodyPattern = /حول[ت]?\s+(?:ل|الي|إلي|الى)\s*(\S+)\s+(\d+(?:\.\d+)?)\s*(?:ريال|ر\.?س)\s*(?:ما\s*)?(?:يعادل|يساو[يى]|معادل)\s*(\d+(?:\.\d+)?)\s*(?:جني[هة]|ليره)/i;
+    var custodyMatch = text.match(custodyPattern);
+
+    // نمط بدون مسافة بعد ل: "حولت لمصطفي"
+    if (!custodyMatch) {
+      custodyPattern = /حول[ت]?\s+ل(\S+)\s+(\d+(?:\.\d+)?)\s*(?:ريال|ر\.?س)\s*(?:ما\s*)?(?:يعادل|يساو[يى]|معادل)\s*(\d+(?:\.\d+)?)\s*(?:جني[هة]|ليره)/i;
+      custodyMatch = text.match(custodyPattern);
+    }
+
+    if (custodyMatch) {
+      isCustodyCompound = true;
+      var rawName = custodyMatch[1].trim();
+      amountSAR = parseFloat(custodyMatch[2]);
+      amountEGP = parseFloat(custodyMatch[3]);
+
+      // تحديد حساب أمين العهدة
+      for (var ck in nameToAccount) {
+        if (rawName === ck || rawName.indexOf(ck) !== -1 || ck.indexOf(rawName) !== -1) {
+          custodyAccount = nameToAccount[ck];
+          custodyName = ck;
+        }
+      }
+
+      if (!custodyAccount) {
+        Logger.log('Custody compound: could not identify custodian: ' + rawName);
+        return null;
+      }
+
+      Logger.log('Custody compound: custodian=' + custodyName + ' (' + custodyAccount +
+                 '), SAR=' + amountSAR + ', EGP=' + amountEGP);
+    }
+  }
+
+  if (!transferMatch && !isCustodyCompound) {
     Logger.log('No transfer pattern found, returning null');
     return null;
   }
+
+  // ⭐ معالجة نمط العهدة المركب (حولت ل + ريال يعادل جنيه + توزيع)
+  if (isCustodyCompound) {
+    var exchangeRate = (amountEGP / amountSAR).toFixed(2);
+    var transactions = [];
+
+    // المعاملة 1: التحويل الرئيسي MAIN → أمين العهدة
+    transactions.push({
+      nature: 'تحويل',
+      type: 'تحويل',
+      category: 'عهدة',
+      item: 'تحويل لعهدة ' + accountToName[custodyAccount],
+      amount: amountSAR,
+      currency: 'ريال',
+      fromAccount: 'MAIN',
+      from_account: 'MAIN',
+      toAccount: custodyAccount,
+      to_account: custodyAccount,
+      convertedAmount: amountEGP,
+      convertedCurrency: 'جنيه',
+      exchangeRate: exchangeRate,
+      description: 'تحويل ' + amountSAR + ' ريال (= ' + amountEGP + ' جنيه) لعهدة ' + custodyName
+    });
+
+    // ⭐ استخراج التوزيعات
+    var remainingEGP = amountEGP;
+
+    // نمط "ياخد/يعطي [لنفسه|لشخص] [مبلغ]" أو "[مبلغ] ياخد/يعطي"
+    var distPatterns = [
+      /(?:ياخد|ياخذ|يعطي|تعطي|تاخد)\s+(?:منهم\s+)?(?:لنفسه?\s+|ل\S+\s+)?(\d+)/i,
+      /(?:منهم\s+)?(?:لنفسه?\s+|ل\S+\s+)?(\d+)\s*(?:جني[هة]|ليره)?\s*(?:ياخد|يعطي)/i,
+      /(?:ياخد|ياخذ|يعطي|تعطي|تاخد)\s+(\d+)/i,
+      /منهم\s+(\d+)/i,
+      /منهم\s+(?:ل\S+|لنفسه?)\s+(\d+)/i,
+    ];
+
+    var selfAmount = 0;
+    for (var dp = 0; dp < distPatterns.length; dp++) {
+      var distMatch = text.match(distPatterns[dp]);
+      if (distMatch) {
+        selfAmount = parseFloat(distMatch[1]);
+        Logger.log('Distribution found with pattern ' + dp + ': ' + selfAmount);
+        break;
+      }
+    }
+
+    // تحديد من يأخد - الشخص المذكور أو أمين العهدة نفسه
+    var recipientAccount = custodyAccount;
+    var recipientName = custodyName;
+    var recipientMatch = text.match(/(?:ياخد|يعطي|تعطي|تاخد)\s+(?:منهم\s+)?ل(\S+)/i);
+    if (recipientMatch) {
+      var recName = recipientMatch[1].trim();
+      if (/نفس/i.test(recName)) {
+        recipientAccount = custodyAccount;
+      } else {
+        for (var rk in nameToAccount) {
+          if (recName === rk || recName.indexOf(rk) !== -1 || rk.indexOf(recName) !== -1) {
+            recipientAccount = nameToAccount[rk];
+            recipientName = rk;
+          }
+        }
+      }
+    }
+
+    if (selfAmount > 0) {
+      // معاملة صرف من العهدة
+      transactions.push({
+        nature: 'مصروف',
+        type: 'مصروف',
+        category: 'صرف_عهدة',
+        item: 'صرف من عهدة ' + accountToName[custodyAccount],
+        amount: selfAmount,
+        currency: 'جنيه',
+        fromAccount: custodyAccount,
+        from_account: custodyAccount,
+        toAccount: '',
+        to_account: '',
+        description: 'صرف ' + selfAmount + ' جنيه من عهدة ' + custodyName
+      });
+      remainingEGP -= selfAmount;
+    }
+
+    // فحص جمعية
+    var assocPatterns = [
+      /(?:تدفع|يدفع|دفع)\s+جمعي[ةه]\s+(\d+)/i,
+      /جمعي[ةه]\s+(\d+)/i,
+      /(\d+)\s+جمعي[ةه]/i,
+    ];
+    var assocAmount = 0;
+    for (var ap = 0; ap < assocPatterns.length; ap++) {
+      var assocMatch = text.match(assocPatterns[ap]);
+      if (assocMatch) {
+        assocAmount = parseFloat(assocMatch[1]);
+        break;
+      }
+    }
+    if (assocAmount > 0) {
+      transactions.push({
+        nature: 'مصروف',
+        type: 'مصروف',
+        category: 'جمعية',
+        item: 'قسط جمعية',
+        amount: assocAmount,
+        currency: 'جنيه',
+        fromAccount: custodyAccount,
+        from_account: custodyAccount,
+        toAccount: '',
+        to_account: '',
+        description: 'قسط جمعية من عهدة ' + custodyName
+      });
+      remainingEGP -= assocAmount;
+    }
+
+    // فحص مساعدات للأهل
+    var helpPatterns = [
+      /(?:تعطي|يعطي|اعطي)\s+(\S+)\s+(\d+)/i,
+    ];
+    for (var hp = 0; hp < helpPatterns.length; hp++) {
+      var helpMatch = text.match(helpPatterns[hp]);
+      if (helpMatch) {
+        var helpPersonRaw = helpMatch[1].trim();
+        var helpAmount = parseFloat(helpMatch[2]);
+        var helpAccount = '';
+        for (var hk in nameToAccount) {
+          if (helpPersonRaw === hk || helpPersonRaw.indexOf(hk) !== -1 || hk.indexOf(helpPersonRaw) !== -1) {
+            helpAccount = nameToAccount[hk];
+          }
+        }
+        if (helpAccount && helpAmount > 0) {
+          transactions.push({
+            nature: 'تحويل',
+            type: 'تحويل',
+            category: 'عهدة',
+            item: 'تحويل بين عهد',
+            amount: helpAmount,
+            currency: 'جنيه',
+            fromAccount: custodyAccount,
+            from_account: custodyAccount,
+            toAccount: helpAccount,
+            to_account: helpAccount,
+            description: 'تحويل من عهدة ' + custodyName + ' إلى ' + helpPersonRaw
+          });
+          remainingEGP -= helpAmount;
+        }
+      }
+    }
+
+    // "والباقي عهده" = الباقي يبقى في العهدة (لا نحتاج معاملة إضافية)
+    Logger.log('Custody compound: remaining in custody = ' + remainingEGP + ' EGP');
+
+    if (transactions.length >= 1) {
+      return {
+        success: true, نجاح: true,
+        transactions: transactions,
+        معاملات: transactions,
+        message: 'تم تحليل ' + transactions.length + ' حركة',
+        رسالة: 'تم تحليل ' + transactions.length + ' حركة'
+      };
+    }
+    return null;
+  }
+
+  // ⭐ المعالجة الأصلية: نمط "من X الي Y مبلغ"
 
   var fromName = transferMatch[1].trim();
   var toName = transferMatch[2].trim();
