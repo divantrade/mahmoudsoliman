@@ -2077,26 +2077,50 @@ function sendBalanceSummary(chatId) {
     var sheet = getOrCreateSheet(SHEETS.TRANSACTIONS);
     var data = sheet.getDataRange().getValues();
 
-    var income = 0, expense = 0, transfer = 0;
+    var income = { SAR: 0, EGP: 0 };
+    var expense = { SAR: 0, EGP: 0 };
+    var transfer = { SAR: 0, EGP: 0 };
 
+    // 0:ID, 1:Date, 2:Time, 3:Nature, 4:Category, 5:Item, 6:Amount, 7:Currency
     for (var i = 1; i < data.length; i++) {
-      var type = data[i][3];
-      var amount = parseFloat(data[i][5]) || 0;
+      var nature = data[i][3];
+      var amount = parseFloat(data[i][6]) || 0;
+      var currency = normalizeCurrency(data[i][7]) || 'SAR';
 
-      if (type === 'دخل') income += amount;
-      else if (type === 'مصروف') expense += amount;
-      else if (type === 'تحويل') transfer += amount;
+      if (nature === 'إيراد') {
+        income[currency] = (income[currency] || 0) + amount;
+      } else if (nature === 'مصروف') {
+        expense[currency] = (expense[currency] || 0) + amount;
+      } else if (nature === 'تحويل') {
+        transfer[currency] = (transfer[currency] || 0) + amount;
+      }
     }
 
-    var balance = income - expense - transfer;
+    var netSAR = (income.SAR || 0) - (expense.SAR || 0) - (transfer.SAR || 0);
+    var netEGP = (income.EGP || 0) - (expense.EGP || 0) - (transfer.EGP || 0);
 
     var msg = '💰 *ملخص الرصيد*\n' +
       '━━━━━━━━━━━━━━━━━━━━━\n\n' +
-      '📥 الدخل: ' + formatNumber(income) + ' ر.س\n' +
-      '📤 المصروفات: ' + formatNumber(expense) + ' ر.س\n' +
-      '💸 التحويلات: ' + formatNumber(transfer) + ' ر.س\n\n' +
-      '━━━━━━━━━━━━━━━━━━━━━\n' +
-      '💵 *الرصيد:* ' + formatNumber(balance) + ' ر.س';
+      '📥 *الإيرادات:*\n';
+    if (income.SAR) msg += '   ' + formatNumber(income.SAR) + ' ر.س\n';
+    if (income.EGP) msg += '   ' + formatNumber(income.EGP) + ' ج.م\n';
+    if (!income.SAR && !income.EGP) msg += '   0\n';
+
+    msg += '\n📤 *المصروفات:*\n';
+    if (expense.SAR) msg += '   ' + formatNumber(expense.SAR) + ' ر.س\n';
+    if (expense.EGP) msg += '   ' + formatNumber(expense.EGP) + ' ج.م\n';
+    if (!expense.SAR && !expense.EGP) msg += '   0\n';
+
+    msg += '\n💸 *التحويلات:*\n';
+    if (transfer.SAR) msg += '   ' + formatNumber(transfer.SAR) + ' ر.س\n';
+    if (transfer.EGP) msg += '   ' + formatNumber(transfer.EGP) + ' ج.م\n';
+    if (!transfer.SAR && !transfer.EGP) msg += '   0\n';
+
+    msg += '\n━━━━━━━━━━━━━━━━━━━━━\n';
+    msg += '💵 *الصافي:*\n';
+    if (netSAR !== 0) msg += '   ' + formatNumber(netSAR) + ' ر.س\n';
+    if (netEGP !== 0) msg += '   ' + formatNumber(netEGP) + ' ج.م\n';
+    if (netSAR === 0 && netEGP === 0) msg += '   0\n';
 
     sendMessage(chatId, msg);
 
