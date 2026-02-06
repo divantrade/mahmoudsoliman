@@ -132,29 +132,128 @@ function verifyAdminPassword(password) {
 }
 
 /**
- * إنشاء جميع الشيتات
+ * ⭐ إنشاء النظام من الصفر (بدون كلمة سر)
+ * شغّل هذه الدالة مرة واحدة لإنشاء كل الشيتات والبيانات
+ */
+function setupSystemFromScratch() {
+  Logger.log('🚀 بدء إنشاء النظام من الصفر...');
+
+  try {
+    // 1. إنشاء جميع الشيتات
+    Logger.log('📋 إنشاء الشيتات...');
+    const sheetNames = Object.values(SHEETS);
+    sheetNames.forEach(sheetName => {
+      getOrCreateSheet(sheetName);
+      Logger.log('   ✓ ' + sheetName);
+    });
+
+    // 2. إضافة البيانات الافتراضية
+    Logger.log('💰 إضافة العملات...');
+    addDefaultCurrencies();
+
+    Logger.log('🏦 إضافة الحسابات...');
+    addDefaultAccounts();
+
+    Logger.log('📂 إضافة البنود...');
+    addDefaultItems();
+
+    Logger.log('⚙️ إضافة الإعدادات...');
+    addDefaultSettings();
+
+    // 3. إضافة القوائم المنسدلة
+    Logger.log('📝 إضافة القوائم المنسدلة...');
+    addAllDropdowns();
+
+    // 4. إضافة المستخدم الافتراضي (المدير)
+    Logger.log('👤 إضافة المستخدم الافتراضي...');
+    addDefaultAdmin();
+
+    // 5. تنسيق الشيتات
+    Logger.log('🎨 تنسيق الشيتات...');
+    formatAllSheets();
+
+    Logger.log('✅ تم إنشاء النظام بنجاح!');
+    return '✅ تم إنشاء النظام من الصفر بنجاح!\n\nالشيتات المنشأة:\n- ' + sheetNames.join('\n- ');
+
+  } catch (error) {
+    Logger.log('❌ خطأ: ' + error.toString());
+    throw error;
+  }
+}
+
+/**
+ * إنشاء جميع الشيتات (مع كلمة سر)
  */
 function initializeAllSheets(password) {
-  if (!password || !verifyAdminPassword(password)) {
+  if (password && !verifyAdminPassword(password)) {
     throw new Error('⛔ كلمة السر غير صحيحة!');
   }
 
-  const sheetNames = Object.values(SHEETS);
+  return setupSystemFromScratch();
+}
 
-  sheetNames.forEach(sheetName => {
-    getOrCreateSheet(sheetName);
+/**
+ * إضافة المستخدم الافتراضي (المدير)
+ */
+function addDefaultAdmin() {
+  const sheet = getOrCreateSheet(SHEETS.USERS);
+  const existingData = sheet.getDataRange().getValues();
+
+  // تحقق من وجود المدير
+  let adminExists = false;
+  for (let i = 1; i < existingData.length; i++) {
+    if (existingData[i][1] == '786700586') {
+      adminExists = true;
+      break;
+    }
+  }
+
+  if (!adminExists) {
+    const now = new Date();
+    const row = [
+      1,
+      '786700586',
+      'Adel',
+      'adelsolmn',
+      'مدير',
+      'MAIN',
+      'نعم',
+      Utilities.formatDate(now, CONFIG.TIMEZONE, 'yyyy-MM-dd HH:mm:ss'),
+      Utilities.formatDate(now, CONFIG.TIMEZONE, 'yyyy-MM-dd HH:mm:ss'),
+      'المدير الافتراضي'
+    ];
+    sheet.appendRow(row);
+  }
+}
+
+/**
+ * تنسيق جميع الشيتات
+ */
+function formatAllSheets() {
+  const ss = getSpreadsheet();
+
+  Object.values(SHEETS).forEach(sheetName => {
+    const sheet = ss.getSheetByName(sheetName);
+    if (sheet) {
+      // تجميد الصف الأول
+      sheet.setFrozenRows(1);
+
+      // تنسيق الهيدر
+      const lastCol = sheet.getLastColumn();
+      if (lastCol > 0) {
+        sheet.getRange(1, 1, 1, lastCol)
+          .setBackground('#1a73e8')
+          .setFontColor('white')
+          .setFontWeight('bold')
+          .setHorizontalAlignment('center');
+
+        // محاذاة البيانات للعربية
+        const lastRow = Math.max(sheet.getLastRow(), 2);
+        sheet.getRange(2, 1, lastRow - 1, lastCol)
+          .setHorizontalAlignment('right');
+      }
+    }
   });
-
-  // إضافة البيانات الافتراضية
-  addDefaultCurrencies();
-  addDefaultAccounts();
-  addDefaultItems();
-  addDefaultSettings();
-
-  // إضافة القوائم المنسدلة
-  addAllDropdowns();
-
-  return '✅ تم إنشاء جميع الشيتات بنجاح!';
 }
 
 /**
@@ -400,40 +499,91 @@ function getAccountCodesForAI() {
 }
 
 /**
- * حساب رصيد حساب معين
+ * حساب رصيد حساب معين (بكل العملات)
+ * @param {string} accountCode - كود الحساب
+ * @returns {object} - {SAR: 0, EGP: 0, USD: 0}
  */
 function calculateAccountBalance(accountCode) {
   try {
     const account = getAccountByCode(accountCode);
-    if (!account || !account.affectsBalance) return 0;
+    if (!account) return { SAR: 0, EGP: 0, USD: 0 };
+
+    // إذا كان الحساب لا يؤثر على الرصيد (مثل المستفيدين)
+    if (!account.affectsBalance) return { SAR: 0, EGP: 0, USD: 0 };
 
     const sheet = getOrCreateSheet(SHEETS.TRANSACTIONS);
     const data = sheet.getDataRange().getValues();
 
-    let balance = account.openingBalance || 0;
+    // الأرصدة بكل عملة
+    let balances = {
+      SAR: 0,
+      EGP: 0,
+      USD: 0
+    };
+
+    // الرصيد الافتتاحي
+    if (account.openingBalance) {
+      const currency = account.currency || 'SAR';
+      balances[currency] = (balances[currency] || 0) + account.openingBalance;
+    }
+
+    // Transaction columns:
+    // 0:ID, 1:Date, 2:Time, 3:Nature, 4:Category, 5:Item, 6:Amount, 7:Currency
+    // 8:FromAccount, 9:ToAccount, 10:ConvertedAmount, 11:ConvertedCurrency, 12:ExchangeRate
 
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
       const fromAccount = row[8];  // من_حساب
       const toAccount = row[9];    // إلى_حساب
       const amount = parseFloat(row[6]) || 0;  // المبلغ
+      const currency = normalizeCurrency(row[7]) || 'SAR';  // العملة
+      const convertedAmount = parseFloat(row[10]) || 0;  // المبلغ المحول
+      const convertedCurrency = normalizeCurrency(row[11]);  // عملة التحويل
 
       // إذا كان الحساب هو المصدر (خصم)
       if (fromAccount === accountCode) {
-        balance -= amount;
+        balances[currency] = (balances[currency] || 0) - amount;
       }
 
       // إذا كان الحساب هو الوجهة (إضافة)
       if (toAccount === accountCode) {
-        balance += amount;
+        // إذا كان هناك مبلغ محول، استخدمه
+        if (convertedAmount && convertedCurrency) {
+          balances[convertedCurrency] = (balances[convertedCurrency] || 0) + convertedAmount;
+        } else {
+          balances[currency] = (balances[currency] || 0) + amount;
+        }
       }
     }
 
-    return balance;
+    return balances;
   } catch (error) {
     Logger.log('Error calculating balance: ' + error.toString());
-    return 0;
+    return { SAR: 0, EGP: 0, USD: 0 };
   }
+}
+
+/**
+ * تطبيع اسم العملة
+ */
+function normalizeCurrency(currency) {
+  if (!currency) return 'SAR';
+
+  const currencyMap = {
+    'ريال': 'SAR',
+    'ر.س': 'SAR',
+    'SAR': 'SAR',
+    'جنيه': 'EGP',
+    'ج.م': 'EGP',
+    'EGP': 'EGP',
+    'دولار': 'USD',
+    '$': 'USD',
+    'USD': 'USD',
+    'درهم': 'AED',
+    'AED': 'AED'
+  };
+
+  return currencyMap[currency] || currency;
 }
 
 /**
