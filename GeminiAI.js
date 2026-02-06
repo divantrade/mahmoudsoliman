@@ -23,12 +23,13 @@ function convertArabicToWesternNumerals(str) {
  */
 function parseCompoundTransactionLocally(message) {
   Logger.log('=== parseCompoundTransactionLocally START ===');
+  Logger.log('Original message: ' + message);
 
   // تحويل الأرقام العربية وتنظيف
   var text = convertArabicToWesternNumerals(message);
   text = text.replace(/[\u064B-\u065F]/g, ''); // إزالة التشكيل
 
-  Logger.log('Normalized: ' + text);
+  Logger.log('After normalization: ' + text);
 
   // قاموس الأسماء
   var nameToAccount = {
@@ -45,12 +46,14 @@ function parseCompoundTransactionLocally(message) {
     'HAGAR': 'هاجر', 'MOHAMED': 'محمد', 'MAIN': 'الرئيسي'
   };
 
-  // ⭐ نمط "من X الي Y مبلغ"
-  var transferPattern = /من\s+([^\s,،]+)\s+(?:الي|الى|إلى|ل)\s+([^\s,،]+)\s+(\d+)/i;
+  // ⭐ نمط "من X الي Y مبلغ" - أكثر مرونة
+  var transferPattern = /من\s+(\S+)\s+(?:الي|الى|إلى|ل|لـ)\s+(\S+)\s+(\d+)/i;
   var transferMatch = text.match(transferPattern);
 
+  Logger.log('Transfer pattern test: ' + (transferMatch ? 'MATCHED' : 'NO MATCH'));
+
   if (!transferMatch) {
-    Logger.log('No transfer pattern found');
+    Logger.log('No transfer pattern found, returning null');
     return null;
   }
 
@@ -58,27 +61,27 @@ function parseCompoundTransactionLocally(message) {
   var toName = transferMatch[2].trim();
   var mainAmount = parseFloat(transferMatch[3]);
 
-  Logger.log('Transfer: from=' + fromName + ', to=' + toName + ', amount=' + mainAmount);
+  Logger.log('Parsed transfer: from="' + fromName + '", to="' + toName + '", amount=' + mainAmount);
 
   // تحديد الحسابات
   var fromAccount = null;
   var toAccount = null;
 
   for (var key in nameToAccount) {
-    if (fromName.indexOf(key) !== -1 || key.indexOf(fromName) !== -1) {
+    if (fromName === key || fromName.indexOf(key) !== -1 || key.indexOf(fromName) !== -1) {
       fromAccount = nameToAccount[key];
+      Logger.log('From account matched: ' + key + ' -> ' + fromAccount);
     }
-    if (toName.indexOf(key) !== -1 || key.indexOf(toName) !== -1) {
+    if (toName === key || toName.indexOf(key) !== -1 || key.indexOf(toName) !== -1) {
       toAccount = nameToAccount[key];
+      Logger.log('To account matched: ' + key + ' -> ' + toAccount);
     }
   }
 
   if (!fromAccount || !toAccount) {
-    Logger.log('Could not identify accounts');
+    Logger.log('Could not identify accounts: from=' + fromAccount + ', to=' + toAccount);
     return null;
   }
-
-  Logger.log('Accounts: from=' + fromAccount + ', to=' + toAccount);
 
   // تحديد العملة
   var currency = 'جنيه';
@@ -87,7 +90,7 @@ function parseCompoundTransactionLocally(message) {
 
   var transactions = [];
 
-  // ⭐ المعاملة 1: التحويل الرئيسي
+  // ⭐ المعاملة 1: التحويل الرئيسي (معاملة واحدة فقط!)
   transactions.push({
     nature: 'تحويل',
     type: 'تحويل',
@@ -106,18 +109,33 @@ function parseCompoundTransactionLocally(message) {
   var remainingAmount = mainAmount;
   var subExpenses = [];
 
-  // نمط الجمعية: "دفعت جمعية X" أو "جمعيه X"
-  var assocPattern = /(?:دفع[ت]?|صرف[ت]?)\s*(?:مراتي|زوجتي|هي)?\s*جمعي[ةه]\s*(?:[^\d]*)?(\d+)/i;
-  var assocMatch = text.match(assocPattern);
-  if (assocMatch) {
-    var assocAmount = parseFloat(assocMatch[1]);
+  // ⭐ نمط الجمعية المحسن: يبحث عن "جمعي" ثم أي نص ثم رقم
+  // "دفعت مراتي جمعيه عمتو سوما 1500 ليرة"
+  var assocPatterns = [
+    /جمعي[ةه]\s+[^\d]+\s+(\d+)/i,           // جمعيه عمتو سوما 1500
+    /جمعي[ةه]\s+(\d+)/i,                     // جمعيه 1500
+    /دفع[ت]?\s+جمعي[ةه]\s+(\d+)/i,          // دفعت جمعيه 1500
+    /(\d+)\s+(?:ليرة?|جنيه?)?\s*جمعي[ةه]/i  // 1500 جمعيه
+  ];
+
+  var assocAmount = 0;
+  for (var p = 0; p < assocPatterns.length; p++) {
+    var assocMatch = text.match(assocPatterns[p]);
+    if (assocMatch) {
+      assocAmount = parseFloat(assocMatch[1]);
+      Logger.log('Association found with pattern ' + p + ': ' + assocAmount);
+      break;
+    }
+  }
+
+  if (assocAmount > 0) {
     subExpenses.push({
       type: 'جمعية',
       amount: assocAmount,
       description: 'قسط جمعية'
     });
     remainingAmount -= assocAmount;
-    Logger.log('Found association: ' + assocAmount);
+    Logger.log('Association expense: ' + assocAmount + ', remaining: ' + remainingAmount);
   }
 
   // نمط مصروفات محددة: "دفعت X للبيت" أو "X مصروفات"
@@ -131,22 +149,24 @@ function parseCompoundTransactionLocally(message) {
       description: 'مصروفات منزلية'
     });
     remainingAmount -= expAmount;
-    Logger.log('Found expense: ' + expAmount);
+    Logger.log('Found specific expense: ' + expAmount);
   }
 
-  // ⭐ "والباقي مصروفها" أو "والباقي معاها"
-  if (/والباقي\s*(?:مصروف|بمصروف|صرف)/i.test(text)) {
-    if (remainingAmount > 0) {
-      subExpenses.push({
-        type: 'مصروفات',
-        amount: remainingAmount,
-        description: 'مصروفات (الباقي)'
-      });
-      Logger.log('Remaining as expenses: ' + remainingAmount);
-    }
+  // ⭐ "والباقي مصروفها" أو "والباقي بمصروفها"
+  var hasRemaining = /والباقي\s*(?:مصروف|بمصروف|صرف|لمصروف)/i.test(text);
+  Logger.log('Has remaining pattern: ' + hasRemaining + ', remainingAmount: ' + remainingAmount);
+
+  if (hasRemaining && remainingAmount > 0) {
+    subExpenses.push({
+      type: 'مصروفات',
+      amount: remainingAmount,
+      description: 'مصروفات (الباقي)'
+    });
+    Logger.log('Added remaining as expenses: ' + remainingAmount);
   }
 
   // ⭐ إضافة المصروفات الفرعية كمعاملات
+  Logger.log('Sub expenses count: ' + subExpenses.length);
   for (var i = 0; i < subExpenses.length; i++) {
     var exp = subExpenses[i];
     var cat = exp.type === 'جمعية' ? 'جمعية' : 'معيشة';
@@ -165,21 +185,25 @@ function parseCompoundTransactionLocally(message) {
       to_account: '',
       description: exp.description + ' من ' + accountToName[toAccount]
     });
+    Logger.log('Added sub-expense: ' + exp.type + ' = ' + exp.amount);
   }
 
-  if (transactions.length > 1) {
-    Logger.log('Local parsing successful: ' + transactions.length + ' transactions');
+  Logger.log('Total transactions: ' + transactions.length);
+
+  // نرجع النتيجة حتى لو كان هناك معاملة واحدة فقط (التحويل)
+  if (transactions.length >= 1) {
+    Logger.log('=== parseCompoundTransactionLocally SUCCESS ===');
     return {
       success: true,
       نجاح: true,
       transactions: transactions,
       معاملات: transactions,
-      message: 'تم تحليل ' + transactions.length + ' حركات',
-      رسالة: 'تم تحليل ' + transactions.length + ' حركات'
+      message: 'تم تحليل ' + transactions.length + ' حركة',
+      رسالة: 'تم تحليل ' + transactions.length + ' حركة'
     };
   }
 
-  Logger.log('Not enough transactions found, falling back to AI');
+  Logger.log('=== parseCompoundTransactionLocally FAILED ===');
   return null;
 }
 
