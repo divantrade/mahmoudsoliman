@@ -1531,3 +1531,414 @@ function findMatchingCategory(keyword, type) {
   const item = findItem(keyword);
   return item ? item.item : null;
 }
+
+// =====================================================
+// ============== دوال الجمعيات ==============
+// =====================================================
+
+/**
+ * ⭐ تحليل رسالة الجمعية واستخراج البيانات
+ * مثال: "دخلت جمعيه بدأت شهر 2 لمدة 18 شهر هدفع شهريا 1500 هقبض رقم 18 اسم الجمعيه عمتو سوما المسئول عن الجمعية مراتي"
+ *
+ * @param {string} text - النص الطبيعي للرسالة
+ * @returns {Object} - البيانات المستخرجة
+ */
+function parseAssociationMessage(text) {
+  Logger.log('⭐ Parsing association message: ' + text);
+
+  var result = {
+    name: null,           // اسم الجمعية
+    responsible: null,    // المسؤول
+    account: null,        // حساب المسؤول
+    installment: null,    // قيمة القسط
+    currency: 'EGP',      // العملة الافتراضية
+    duration: null,       // عدد الأشهر
+    collectionOrder: null, // ترتيب القبض
+    startMonth: null,     // شهر البداية (1-12)
+    startYear: null       // سنة البداية
+  };
+
+  var normalizedText = text.replace(/[\u064B-\u065F]/g, '').trim(); // إزالة التشكيل
+  normalizedText = normalizedText.replace(/\s+/g, ' '); // تنظيف المسافات
+
+  // ═══════════════ استخراج اسم الجمعية ═══════════════
+  // أنماط: "اسم الجمعية X" أو "جمعية X" أو "جمعيه X"
+  var namePatterns = [
+    /اسم\s*الجمعي[ةه]\s+([^\s,،]+(?:\s+[^\s,،]+)?)/i,
+    /جمعي[ةه]\s+(?:اسمها|اسم)\s+([^\s,،]+(?:\s+[^\s,،]+)?)/i,
+    /جمعي[ةه]\s+([^\s,،0-9]+(?:\s+[^\s,،0-9]+)?)\s+(?:من|بمبلغ|لمدة|هقبض|هنقبض|القسط)/i
+  ];
+
+  for (var i = 0; i < namePatterns.length; i++) {
+    var nameMatch = normalizedText.match(namePatterns[i]);
+    if (nameMatch && nameMatch[1]) {
+      result.name = nameMatch[1].trim();
+      break;
+    }
+  }
+
+  // إذا لم نجد الاسم، نبحث عن نمط "جمعية X" في أي مكان
+  if (!result.name) {
+    var simpleNameMatch = normalizedText.match(/جمعي[ةه]\s+([^\s,،0-9]+(?:\s+[^\s,،0-9]+)?)/i);
+    if (simpleNameMatch && simpleNameMatch[1] && !['من', 'شهر', 'لمدة', 'مع', 'بمبلغ', 'القسط'].includes(simpleNameMatch[1].trim())) {
+      result.name = simpleNameMatch[1].trim();
+    }
+  }
+
+  // ═══════════════ استخراج المسؤول ═══════════════
+  // أنماط: "المسؤول X" أو "المسئول X" أو "مع X" أو "X دخلت جمعية"
+  var responsiblePatterns = [
+    /(?:المسؤول|المسئول)\s*(?:عن\s*الجمعي[ةه])?\s*([^\s,،]+)/i,
+    /(?:مسؤول|مسئول)\s*الجمعي[ةه]\s*([^\s,،]+)/i,
+    /جمعي[ةه]\s*(?:مع|عند)\s+([^\s,،]+)/i,
+    /^([^\s,،]+)\s+(?:دخلت?|اشتركت?)\s+(?:في\s*)?جمعي[ةه]/i
+  ];
+
+  for (var i = 0; i < responsiblePatterns.length; i++) {
+    var respMatch = normalizedText.match(responsiblePatterns[i]);
+    if (respMatch && respMatch[1]) {
+      result.responsible = respMatch[1].trim();
+      break;
+    }
+  }
+
+  // تحديد حساب المسؤول من CONTACTS
+  if (result.responsible) {
+    var contact = findContactByAlias(result.responsible);
+    if (contact) {
+      result.account = contact.account;
+      result.responsible = contact.name;
+    }
+  }
+
+  // ═══════════════ استخراج قيمة القسط ═══════════════
+  // أنماط: "القسط X" أو "بمبلغ X" أو "شهريا X" أو "هدفع X"
+  var installmentPatterns = [
+    /(?:القسط|قسط)\s*(\d+(?:[.,]\d+)?)/i,
+    /(?:بمبلغ|مبلغ)\s*(\d+(?:[.,]\d+)?)/i,
+    /(?:هدفع|هندفع|ندفع|ادفع)\s*(?:شهريا?)?\s*(\d+(?:[.,]\d+)?)/i,
+    /(?:شهريا?)\s*(\d+(?:[.,]\d+)?)/i,
+    /(\d+(?:[.,]\d+)?)\s*(?:جنيه?|ريال|ر\.?س)/i
+  ];
+
+  for (var i = 0; i < installmentPatterns.length; i++) {
+    var instMatch = normalizedText.match(installmentPatterns[i]);
+    if (instMatch && instMatch[1]) {
+      result.installment = parseFloat(instMatch[1].replace(',', '.'));
+      break;
+    }
+  }
+
+  // إذا لم نجد القسط، نبحث عن أي رقم كبير
+  if (!result.installment) {
+    var numbersInText = normalizedText.match(/\b(\d{3,})\b/g);
+    if (numbersInText && numbersInText.length > 0) {
+      // نأخذ أول رقم كبير كقيمة القسط
+      result.installment = parseFloat(numbersInText[0]);
+    }
+  }
+
+  // ═══════════════ استخراج مدة الجمعية ═══════════════
+  // أنماط: "لمدة X شهر" أو "X شهور" أو "X أشهر"
+  var durationPatterns = [
+    /(?:لمدة?|مدة?)\s*(\d+)\s*(?:شهر|شهور|أشهر|اشهر)/i,
+    /(\d+)\s*(?:شهر|شهور|أشهر|اشهر)/i
+  ];
+
+  for (var i = 0; i < durationPatterns.length; i++) {
+    var durMatch = normalizedText.match(durationPatterns[i]);
+    if (durMatch && durMatch[1]) {
+      result.duration = parseInt(durMatch[1]);
+      break;
+    }
+  }
+
+  // ═══════════════ استخراج ترتيب القبض ═══════════════
+  // أنماط: "هقبض رقم X" أو "هقبض الـX" أو "ترتيب القبض X" أو "هقبض X"
+  var orderPatterns = [
+    /(?:هقبض|هنقبض|نقبض|اقبض)\s*(?:رقم|ال)?\s*(\d+)/i,
+    /(?:ترتيب\s*)?(?:القبض|قبض)\s*(?:رقم|ال)?\s*(\d+)/i,
+    /(?:الرقم|رقم)\s*(\d+)\s*(?:في\s*القبض|للقبض)?/i,
+    /(?:هقبض|هنقبض)\s*(?:ال)?(\w+)/i  // للأرقام الحرفية مثل "الرابع"
+  ];
+
+  for (var i = 0; i < orderPatterns.length; i++) {
+    var orderMatch = normalizedText.match(orderPatterns[i]);
+    if (orderMatch && orderMatch[1]) {
+      var orderValue = orderMatch[1];
+      // تحويل الأرقام الحرفية للأرقام
+      var wordToNumber = {
+        'اول': 1, 'الاول': 1, 'أول': 1, 'الأول': 1,
+        'ثاني': 2, 'الثاني': 2, 'تاني': 2, 'التاني': 2,
+        'ثالث': 3, 'الثالث': 3, 'تالت': 3, 'التالت': 3,
+        'رابع': 4, 'الرابع': 4,
+        'خامس': 5, 'الخامس': 5,
+        'سادس': 6, 'السادس': 6,
+        'سابع': 7, 'السابع': 7,
+        'ثامن': 8, 'الثامن': 8,
+        'تاسع': 9, 'التاسع': 9,
+        'عاشر': 10, 'العاشر': 10,
+        'حادي': 11, 'الحادي': 11,
+        'ثاني عشر': 12, 'الثاني عشر': 12
+      };
+
+      if (!isNaN(orderValue)) {
+        result.collectionOrder = parseInt(orderValue);
+      } else if (wordToNumber[orderValue.toLowerCase()]) {
+        result.collectionOrder = wordToNumber[orderValue.toLowerCase()];
+      }
+
+      if (result.collectionOrder) break;
+    }
+  }
+
+  // ═══════════════ استخراج شهر البداية ═══════════════
+  // أنماط: "من شهر X" أو "بدأت شهر X" أو "شهر X"
+  var startPatterns = [
+    /(?:من|بدأت?|بداية?|تبدأ?)\s*(?:شهر|اول)?\s*(\d{1,2})/i,
+    /شهر\s*(\d{1,2})/i
+  ];
+
+  for (var i = 0; i < startPatterns.length; i++) {
+    var startMatch = normalizedText.match(startPatterns[i]);
+    if (startMatch && startMatch[1]) {
+      var month = parseInt(startMatch[1]);
+      if (month >= 1 && month <= 12) {
+        result.startMonth = month;
+        break;
+      }
+    }
+  }
+
+  // تحديد سنة البداية (الحالية أو القادمة بناء على الشهر)
+  var now = new Date();
+  var currentMonth = now.getMonth() + 1;
+  var currentYear = now.getFullYear();
+
+  if (result.startMonth) {
+    // إذا كان شهر البداية أقل من الشهر الحالي، نفترض السنة القادمة
+    result.startYear = (result.startMonth < currentMonth) ? currentYear + 1 : currentYear;
+  } else {
+    result.startMonth = currentMonth;
+    result.startYear = currentYear;
+  }
+
+  // ═══════════════ استخراج العملة ═══════════════
+  if (/ريال|ر\.?س|سعودي/i.test(normalizedText)) {
+    result.currency = 'SAR';
+  } else if (/دولار|\$/i.test(normalizedText)) {
+    result.currency = 'USD';
+  } else {
+    result.currency = 'EGP'; // جنيه مصري افتراضي
+  }
+
+  Logger.log('Parsed association result: ' + JSON.stringify(result));
+
+  return result;
+}
+
+/**
+ * ⭐ الحصول على جميع الجمعيات
+ * @param {boolean} activeOnly - إذا كان true يجلب الجمعيات النشطة فقط
+ * @returns {Array} - قائمة الجمعيات
+ */
+function getAllAssociations(activeOnly) {
+  try {
+    var sheet = getSpreadsheet().getSheetByName(SHEETS.ASSOCIATIONS);
+    if (!sheet) {
+      Logger.log('Associations sheet not found');
+      return [];
+    }
+
+    var data = sheet.getDataRange().getValues();
+    if (data.length <= 1) return []; // فقط الهيدر
+
+    var associations = [];
+
+    for (var i = 1; i < data.length; i++) {
+      var row = data[i];
+      if (!row[0]) continue; // تخطي الصفوف الفارغة
+
+      var assoc = {
+        id: row[0],
+        name: row[1],
+        responsible: row[2],
+        account: row[3],
+        installment: parseFloat(row[4]) || 0,
+        currency: row[5] || 'EGP',
+        duration: parseInt(row[6]) || 0,
+        collectionOrder: parseInt(row[7]) || 0,
+        startDate: row[8],
+        expectedCollectionDate: row[9],
+        totalPaid: parseFloat(row[10]) || 0,
+        totalCollected: parseFloat(row[11]) || 0,
+        status: row[12] || 'نشطة',
+        notes: row[13] || ''
+      };
+
+      // فلترة حسب الحالة إذا طلب
+      if (activeOnly && assoc.status !== 'نشطة') continue;
+
+      associations.push(assoc);
+    }
+
+    return associations;
+
+  } catch (error) {
+    Logger.log('Error getting associations: ' + error.toString());
+    return [];
+  }
+}
+
+/**
+ * ⭐ إضافة جمعية جديدة
+ * @param {Object} assocData - بيانات الجمعية
+ * @returns {Object} - نتيجة العملية
+ */
+function addAssociation(assocData) {
+  try {
+    var sheet = getSpreadsheet().getSheetByName(SHEETS.ASSOCIATIONS);
+    if (!sheet) {
+      return { success: false, message: 'شيت الجمعيات غير موجود' };
+    }
+
+    // إنشاء ID فريد
+    var id = 'ASC-' + Date.now();
+
+    // حساب تاريخ البداية
+    var startDate = new Date(assocData.startYear || new Date().getFullYear(),
+                            (assocData.startMonth || new Date().getMonth() + 1) - 1, 1);
+
+    // حساب تاريخ القبض المتوقع
+    var collectionDate = new Date(startDate);
+    collectionDate.setMonth(collectionDate.getMonth() + (assocData.collectionOrder || 1) - 1);
+
+    // تنسيق التواريخ
+    var startDateStr = Utilities.formatDate(startDate, 'Asia/Riyadh', 'yyyy-MM-dd');
+    var collectionDateStr = Utilities.formatDate(collectionDate, 'Asia/Riyadh', 'yyyy-MM-dd');
+
+    // إعداد الصف الجديد
+    var newRow = [
+      id,
+      assocData.name || 'جمعية جديدة',
+      assocData.responsible || '-',
+      assocData.account || 'MAIN',
+      assocData.installment || 0,
+      assocData.currency || 'EGP',
+      assocData.duration || 12,
+      assocData.collectionOrder || 1,
+      startDateStr,
+      collectionDateStr,
+      0, // إجمالي المدفوع
+      0, // إجمالي المقبوض
+      'نشطة',
+      assocData.notes || ''
+    ];
+
+    sheet.appendRow(newRow);
+
+    Logger.log('Association added successfully: ' + id);
+
+    return {
+      success: true,
+      message: 'تم إضافة الجمعية بنجاح',
+      id: id,
+      data: {
+        id: id,
+        name: assocData.name,
+        responsible: assocData.responsible,
+        account: assocData.account,
+        installment: assocData.installment,
+        currency: assocData.currency,
+        duration: assocData.duration,
+        collectionOrder: assocData.collectionOrder,
+        startDate: startDateStr,
+        expectedCollectionDate: collectionDateStr,
+        totalAmount: assocData.installment * assocData.duration
+      }
+    };
+
+  } catch (error) {
+    Logger.log('Error adding association: ' + error.toString());
+    return {
+      success: false,
+      message: 'خطأ في إضافة الجمعية: ' + error.message
+    };
+  }
+}
+
+/**
+ * ⭐ تحديث إجمالي المدفوع للجمعية
+ * @param {string} assocId - معرف الجمعية
+ * @param {number} amount - المبلغ المدفوع
+ */
+function updateAssociationPaid(assocId, amount) {
+  try {
+    var sheet = getSpreadsheet().getSheetByName(SHEETS.ASSOCIATIONS);
+    if (!sheet) return false;
+
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (data[i][0] === assocId) {
+        var currentPaid = parseFloat(data[i][10]) || 0;
+        sheet.getRange(i + 1, 11).setValue(currentPaid + amount);
+        return true;
+      }
+    }
+    return false;
+  } catch (error) {
+    Logger.log('Error updating association paid: ' + error.toString());
+    return false;
+  }
+}
+
+/**
+ * ⭐ تسجيل قبض الجمعية
+ * @param {string} assocId - معرف الجمعية
+ * @param {number} amount - المبلغ المقبوض
+ */
+function recordAssociationCollection(assocId, amount) {
+  try {
+    var sheet = getSpreadsheet().getSheetByName(SHEETS.ASSOCIATIONS);
+    if (!sheet) return { success: false, message: 'شيت الجمعيات غير موجود' };
+
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (data[i][0] === assocId) {
+        var currentCollected = parseFloat(data[i][11]) || 0;
+        sheet.getRange(i + 1, 12).setValue(currentCollected + amount);
+
+        // تحديث الحالة إذا تم القبض
+        if (currentCollected + amount > 0) {
+          sheet.getRange(i + 1, 13).setValue('تم القبض');
+        }
+
+        return {
+          success: true,
+          message: 'تم تسجيل القبض بنجاح',
+          assocName: data[i][1]
+        };
+      }
+    }
+    return { success: false, message: 'الجمعية غير موجودة' };
+  } catch (error) {
+    Logger.log('Error recording collection: ' + error.toString());
+    return { success: false, message: error.message };
+  }
+}
+
+/**
+ * ⭐ البحث عن جمعية بالاسم
+ * @param {string} name - اسم الجمعية (أو جزء منه)
+ * @returns {Object|null}
+ */
+function findAssociationByName(name) {
+  var associations = getAllAssociations(false);
+
+  for (var i = 0; i < associations.length; i++) {
+    if (associations[i].name.includes(name) || name.includes(associations[i].name)) {
+      return associations[i];
+    }
+  }
+  return null;
+}

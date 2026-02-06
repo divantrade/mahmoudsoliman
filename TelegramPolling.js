@@ -1140,19 +1140,20 @@ function processAssociationDirectly(chatId, text, user) {
     // استخدام دالة parseAssociationMessage من SheetsManager
     var parsedAssoc = parseAssociationMessage(text);
 
-    if (!parsedAssoc || !parsedAssoc.isAssociation) {
+    // التحقق أن الدالة أرجعت نتيجة
+    if (!parsedAssoc) {
       sendMessage(chatId, buildErrorWithExamples(text, 'association'));
       return;
     }
 
     Logger.log('Parsed association: ' + JSON.stringify(parsedAssoc));
 
-    // التحقق من البيانات المطلوبة
+    // التحقق من البيانات المطلوبة والسؤال عن الناقص
     var missingFields = [];
-    if (!parsedAssoc.startMonth || parsedAssoc.startMonth <= 0) missingFields.push('شهر البداية');
+    if (!parsedAssoc.name) missingFields.push('اسم الجمعية');
+    if (!parsedAssoc.installment || parsedAssoc.installment <= 0) missingFields.push('قيمة القسط');
     if (!parsedAssoc.duration || parsedAssoc.duration <= 0) missingFields.push('مدة الجمعية');
     if (!parsedAssoc.collectionOrder || parsedAssoc.collectionOrder <= 0) missingFields.push('ترتيب القبض');
-    if (!parsedAssoc.installment || parsedAssoc.installment <= 0) missingFields.push('قيمة القسط');
 
     if (missingFields.length > 0) {
       var helpMsg = '⚠️ بيانات ناقصة:\n';
@@ -1173,24 +1174,30 @@ function processAssociationDirectly(chatId, text, user) {
     }
 
     // حساب المبلغ الإجمالي
-    var totalAmount = parsedAssoc.totalCollection || (parsedAssoc.installment * parsedAssoc.duration);
+    var totalAmount = parsedAssoc.installment * parsedAssoc.duration;
 
     // تحديد الشخص المسؤول
-    var responsiblePerson = parsedAssoc.responsiblePerson || user.name;
+    var responsiblePerson = parsedAssoc.responsible || user.name;
+    var responsibleAccount = parsedAssoc.account || 'MAIN';
+
+    // استخدام السنة من البيانات المحللة
+    var startYear = parsedAssoc.startYear || currentYear;
 
     // بناء رسالة المعاينة
     var previewMsg = '🤝 *جمعية جديدة*\n';
     previewMsg += '═══════════════════\n\n';
-    previewMsg += '📋 الاسم: ' + parsedAssoc.name + '\n';
-    if (responsiblePerson) {
-      previewMsg += '👤 المسؤول: ' + responsiblePerson + '\n';
+    if (parsedAssoc.name) {
+      previewMsg += '📋 الاسم: ' + escapeMarkdown(parsedAssoc.name) + '\n';
     }
-    previewMsg += '💰 قيمة القسط: ' + parsedAssoc.installment.toLocaleString() + ' جنيه\n';
-    previewMsg += '📅 شهر البداية: ' + parsedAssoc.startMonth + '/' + currentYear + '\n';
+    if (responsiblePerson) {
+      previewMsg += '👤 المسؤول: ' + escapeMarkdown(responsiblePerson) + '\n';
+    }
+    previewMsg += '💰 قيمة القسط: ' + formatNumber(parsedAssoc.installment) + ' ' + (parsedAssoc.currency === 'SAR' ? 'ريال' : 'جنيه') + '\n';
+    previewMsg += '📅 شهر البداية: ' + parsedAssoc.startMonth + '/' + startYear + '\n';
     previewMsg += '🔢 المدة: ' + parsedAssoc.duration + ' شهر\n';
     previewMsg += '🎯 ترتيب القبض: ' + parsedAssoc.collectionOrder + '\n';
     previewMsg += '📆 تاريخ القبض المتوقع: ' + collectionMonth + '/' + collectionYear + '\n';
-    previewMsg += '💵 إجمالي القبض: ' + totalAmount.toLocaleString() + ' جنيه\n\n';
+    previewMsg += '💵 إجمالي القبض: ' + formatNumber(totalAmount) + ' ' + (parsedAssoc.currency === 'SAR' ? 'ريال' : 'جنيه') + '\n\n';
     previewMsg += '═══════════════════';
 
     // إنشاء أزرار التأكيد والإلغاء
@@ -1198,10 +1205,13 @@ function processAssociationDirectly(chatId, text, user) {
       type: 'association',
       name: parsedAssoc.name,
       responsible: responsiblePerson,
+      account: responsibleAccount,
       installment: parsedAssoc.installment,
+      currency: parsedAssoc.currency,
       duration: parsedAssoc.duration,
       totalCollection: totalAmount,
       startMonth: parsedAssoc.startMonth,
+      startYear: startYear,
       collectionOrder: parsedAssoc.collectionOrder,
       user_name: user.name,
       telegram_id: user.telegram_id
@@ -1765,38 +1775,35 @@ function handleConfirmAssociation(chatId, data, user) {
     var assocData = JSON.parse(assocDataStr);
     Logger.log('Association data: ' + JSON.stringify(assocData));
 
-    // إضافة الجمعية
-    var result = addNewAssociation({
-      name: assocData.name,
+    // إضافة الجمعية باستخدام الدالة الجديدة
+    var result = addAssociation({
+      name: assocData.name || 'جمعية جديدة',
+      responsible: assocData.responsible || user.name,
+      account: assocData.account || 'MAIN',
       installment: assocData.installment,
+      currency: assocData.currency || 'EGP',
       duration: assocData.duration,
-      startMonth: assocData.startMonth,
       collectionOrder: assocData.collectionOrder,
-      responsible: assocData.responsible || user.name
+      startMonth: assocData.startMonth,
+      startYear: assocData.startYear || new Date().getFullYear()
     });
 
     if (result.success) {
-      // حساب تاريخ القبض المتوقع
-      var currentYear = new Date().getFullYear();
-      var collectionMonth = assocData.startMonth + assocData.collectionOrder - 1;
-      var collectionYear = currentYear;
-      if (collectionMonth > 12) {
-        collectionMonth -= 12;
-        collectionYear++;
-      }
-
-      var totalAmount = assocData.totalCollection || (assocData.installment * assocData.duration);
+      // استخدام البيانات المحسوبة من النتيجة
+      var totalAmount = result.data.totalAmount || (assocData.installment * assocData.duration);
+      var currencySymbol = (assocData.currency === 'SAR') ? 'ريال' : 'جنيه';
 
       var successMsg = '✅ *تم تسجيل الجمعية بنجاح!*\n\n';
-      successMsg += '📋 الاسم: ' + assocData.name + '\n';
+      successMsg += '📋 الاسم: ' + escapeMarkdown(assocData.name || 'جمعية جديدة') + '\n';
       if (assocData.responsible) {
-        successMsg += '👤 المسؤول: ' + assocData.responsible + '\n';
+        successMsg += '👤 المسؤول: ' + escapeMarkdown(assocData.responsible) + '\n';
       }
-      successMsg += '💰 القسط الشهري: ' + assocData.installment.toLocaleString() + ' جنيه\n';
+      successMsg += '💰 القسط الشهري: ' + formatNumber(assocData.installment) + ' ' + currencySymbol + '\n';
       successMsg += '🔢 المدة: ' + assocData.duration + ' شهر\n';
       successMsg += '🎯 ترتيب القبض: ' + assocData.collectionOrder + '\n';
-      successMsg += '📅 موعد القبض: ' + collectionMonth + '/' + collectionYear + '\n';
-      successMsg += '💵 إجمالي القبض: ' + totalAmount.toLocaleString() + ' جنيه\n\n';
+      successMsg += '📅 تاريخ البدء: ' + result.data.startDate + '\n';
+      successMsg += '📆 موعد القبض المتوقع: ' + result.data.expectedCollectionDate + '\n';
+      successMsg += '💵 إجمالي القبض: ' + formatNumber(totalAmount) + ' ' + currencySymbol + '\n\n';
       successMsg += '📝 يمكنك تسجيل أقساط من القائمة: 🤝 الجمعيات';
 
       sendMessage(chatId, successMsg);
