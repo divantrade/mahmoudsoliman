@@ -838,28 +838,7 @@ function resolveTransactionItem(nature, category, item, fromAccount, toAccount) 
     });
     if (exactMatch) return { category: exactMatch.category, item: exactMatch.item };
 
-    // ⭐ 2. تطابق بالطبيعة والبند فقط
-    var itemMatch = items.find(function(i) {
-      return i.nature === nature && normalizeArabic(i.item) === normalizedItem;
-    });
-    if (itemMatch) return { category: itemMatch.category, item: itemMatch.item };
-
-    // ⭐ 3. تطابق جزئي بالبند (يحتوي)
-    var partialItemMatch = items.find(function(i) {
-      return i.nature === nature && (
-        normalizeArabic(i.item).indexOf(normalizedItem) !== -1 ||
-        normalizedItem.indexOf(normalizeArabic(i.item)) !== -1
-      );
-    });
-    if (partialItemMatch) return { category: partialItemMatch.category, item: partialItemMatch.item };
-
-    // ⭐ 4. تطابق بالطبيعة والتصنيف فقط (أول بند في نفس التصنيف)
-    var categoryMatch = items.find(function(i) {
-      return i.nature === nature && normalizeArabic(i.category) === normalizedCategory;
-    });
-    if (categoryMatch) return { category: categoryMatch.category, item: categoryMatch.item };
-
-    // ⭐ 5. تطابق ذكي بالحسابات (للتحويلات)
+    // ⭐ 2. تطابق ذكي بالحسابات (للتحويلات) - أولوية عالية لأنها الأكثر دقة
     if (nature === 'تحويل' && fromAccount && toAccount) {
       var accountMatch = items.find(function(i) {
         return i.nature === 'تحويل' &&
@@ -878,7 +857,7 @@ function resolveTransactionItem(nature, category, item, fromAccount, toAccount) 
       if (toAccountMatch) return { category: toAccountMatch.category, item: toAccountMatch.item };
     }
 
-    // ⭐ 6. تطابق بحساب المصدر للمصروفات من العهدة
+    // ⭐ 3. تطابق بحساب المصدر للمصروفات من العهدة - أولوية عالية
     if (nature === 'مصروف' && fromAccount && fromAccount !== 'MAIN') {
       var custodyExpenseMatch = items.find(function(i) {
         return i.nature === 'مصروف' &&
@@ -886,6 +865,33 @@ function resolveTransactionItem(nature, category, item, fromAccount, toAccount) 
                i.defaultAccount === fromAccount;
       });
       if (custodyExpenseMatch) return { category: custodyExpenseMatch.category, item: custodyExpenseMatch.item };
+    }
+
+    // ⭐ 4. تطابق بالطبيعة والبند فقط
+    if (normalizedItem) {
+      var itemMatch = items.find(function(i) {
+        return i.nature === nature && normalizeArabic(i.item) === normalizedItem;
+      });
+      if (itemMatch) return { category: itemMatch.category, item: itemMatch.item };
+    }
+
+    // ⭐ 5. تطابق جزئي بالبند (يحتوي) - فقط إذا كان البند غير فارغ
+    if (normalizedItem && normalizedItem.length > 1) {
+      var partialItemMatch = items.find(function(i) {
+        return i.nature === nature && (
+          normalizeArabic(i.item).indexOf(normalizedItem) !== -1 ||
+          normalizedItem.indexOf(normalizeArabic(i.item)) !== -1
+        );
+      });
+      if (partialItemMatch) return { category: partialItemMatch.category, item: partialItemMatch.item };
+    }
+
+    // ⭐ 6. تطابق بالطبيعة والتصنيف فقط (أول بند في نفس التصنيف)
+    if (normalizedCategory) {
+      var categoryMatch = items.find(function(i) {
+        return i.nature === nature && normalizeArabic(i.category) === normalizedCategory;
+      });
+      if (categoryMatch) return { category: categoryMatch.category, item: categoryMatch.item };
     }
 
     Logger.log('⚠️ resolveTransactionItem: no match found for nature=' + nature +
