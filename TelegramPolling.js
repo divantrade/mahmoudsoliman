@@ -286,24 +286,39 @@ function buildPreviewMessage(transactions) {
     msg += '🔹 *المعاملة ' + (i + 1) + ':*\n';
 
     // استخدام escapeMarkdown لمنع كسر التنسيق
-    var typeDisplay = (t.type || '-').replace(/_/g, ' '); // تحويل إيداع_عهدة إلى إيداع عهدة
+    var typeDisplay = (t.nature || t.type || '-').replace(/_/g, ' ');
     msg += '   النوع: ' + typeDisplay + '\n';
     msg += '   المبلغ: ' + (t.amount || 0) + ' ' + (t.currency || 'ريال') + '\n';
 
-    if (t.amount_received) {
-      msg += '   المستلم: ' + t.amount_received + ' ' + (t.currency_received || 'جنيه') + '\n';
+    // ⭐ عرض من حساب وإلى حساب بوضوح
+    var fromAccount = t.fromAccount || t.from_account || t.من_حساب;
+    var toAccount = t.toAccount || t.to_account || t.إلى_حساب;
+
+    if (fromAccount) {
+      var fromName = getAccountDisplayName(fromAccount);
+      msg += '   📤 من: ' + escapeMarkdown(fromName) + '\n';
     }
-    if (t.exchange_rate) {
-      msg += '   سعر الصرف: ' + t.exchange_rate + '\n';
+    if (toAccount) {
+      var toName = getAccountDisplayName(toAccount);
+      msg += '   📥 إلى: ' + escapeMarkdown(toName) + '\n';
+    }
+
+    if (t.amount_received || t.convertedAmount) {
+      var received = t.amount_received || t.convertedAmount;
+      var receivedCurrency = t.currency_received || t.convertedCurrency || 'جنيه';
+      msg += '   💱 المحول: ' + received + ' ' + receivedCurrency + '\n';
+    }
+    if (t.exchange_rate || t.exchangeRate) {
+      msg += '   📊 سعر الصرف: ' + (t.exchange_rate || t.exchangeRate) + '\n';
     }
     if (t.category) {
-      msg += '   التصنيف: ' + escapeMarkdown(t.category) + '\n';
+      msg += '   📂 التصنيف: ' + escapeMarkdown(t.category) + '\n';
     }
-    if (t.contact) {
-      msg += '   الجهة: ' + escapeMarkdown(t.contact) + '\n';
+    if (t.item) {
+      msg += '   📝 البند: ' + escapeMarkdown(t.item) + '\n';
     }
     if (t.description) {
-      msg += '   الوصف: ' + escapeMarkdown(t.description) + '\n';
+      msg += '   💬 الوصف: ' + escapeMarkdown(t.description) + '\n';
     }
     msg += '\n';
   }
@@ -312,6 +327,26 @@ function buildPreviewMessage(transactions) {
   msg += '⚠️ *هل البيانات صحيحة؟*';
 
   return msg;
+}
+
+/**
+ * الحصول على اسم الحساب للعرض
+ */
+function getAccountDisplayName(accountCode) {
+  if (!accountCode) return '';
+
+  // محاولة الحصول على الاسم من الشيت
+  try {
+    var account = getAccountByCode(accountCode);
+    if (account && account.name) {
+      return account.name + ' (' + accountCode + ')';
+    }
+  } catch (e) {
+    // تجاهل الخطأ
+  }
+
+  // إذا لم نجد، نرجع الكود
+  return accountCode;
 }
 
 /**
