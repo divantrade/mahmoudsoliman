@@ -1017,7 +1017,20 @@ function addTransaction(transData) {
       notes: transData.notes || transData.ملاحظات || ''
     };
 
-    // ⭐ تحديد الحسابات تلقائياً حسب نوع الحركة
+    // ⭐⭐⭐ استخراج الحسابات من الوصف إذا كانت فارغة ⭐⭐⭐
+    if (newFormat.nature === 'تحويل' && (!newFormat.fromAccount || !newFormat.toAccount)) {
+      var extracted = extractAccountsFromDescription(newFormat.description);
+      if (extracted.fromAccount && !newFormat.fromAccount) {
+        newFormat.fromAccount = extracted.fromAccount;
+        Logger.log('Extracted fromAccount from description: ' + extracted.fromAccount);
+      }
+      if (extracted.toAccount && !newFormat.toAccount) {
+        newFormat.toAccount = extracted.toAccount;
+        Logger.log('Extracted toAccount from description: ' + extracted.toAccount);
+      }
+    }
+
+    // ⭐ تحديد الحسابات تلقائياً حسب نوع الحركة (فقط إذا لا تزال فارغة)
     if (!newFormat.fromAccount && !newFormat.toAccount) {
       switch (newFormat.nature) {
         case 'إيراد':
@@ -1067,6 +1080,83 @@ function addTransaction(transData) {
       message: '❌ خطأ: ' + error.message
     };
   }
+}
+
+/**
+ * ⭐ استخراج الحسابات من وصف الحركة
+ * يحلل نصوص مثل "تحويل من عهدة مصطفى لعهدة الزوجة"
+ */
+function extractAccountsFromDescription(description) {
+  var result = { fromAccount: '', toAccount: '' };
+
+  if (!description) return result;
+
+  // قاموس الأسماء والحسابات
+  var nameToAccount = {
+    'مصطفى': 'MOSTAFA',
+    'مصطفي': 'MOSTAFA',
+    'سارة': 'SARA',
+    'ساره': 'SARA',
+    'الزوجة': 'WIFE',
+    'الزوجه': 'WIFE',
+    'مراتي': 'WIFE',
+    'زوجتي': 'WIFE',
+    'ام سيليا': 'WIFE',
+    'أم سيليا': 'WIFE',
+    'هاجر': 'HAGAR',
+    'محمد': 'MOHAMED',
+    'حسابي': 'MAIN',
+    'الرئيسي': 'MAIN',
+    'الخزنة': 'MAIN'
+  };
+
+  // البحث عن "من X" - استخراج المصدر
+  var fromPatterns = [
+    /من عهدة ([^\s]+)/,
+    /من حساب ([^\s]+)/,
+    /من ([^\s]+) ل/,
+    /من ([^\s]+)$/
+  ];
+
+  for (var i = 0; i < fromPatterns.length; i++) {
+    var match = description.match(fromPatterns[i]);
+    if (match) {
+      var name = match[1].replace(/ة$/, 'ه'); // تطبيع التاء المربوطة
+      for (var key in nameToAccount) {
+        if (name.indexOf(key) !== -1 || key.indexOf(name) !== -1) {
+          result.fromAccount = nameToAccount[key];
+          break;
+        }
+      }
+      if (result.fromAccount) break;
+    }
+  }
+
+  // البحث عن "لـ Y" - استخراج الوجهة
+  var toPatterns = [
+    /لعهدة ([^\s]+)/,
+    /لحساب ([^\s]+)/,
+    /ل([^\s]+)$/,
+    /إلى ([^\s]+)/
+  ];
+
+  for (var j = 0; j < toPatterns.length; j++) {
+    var match2 = description.match(toPatterns[j]);
+    if (match2) {
+      var name2 = match2[1].replace(/ة$/, 'ه');
+      for (var key2 in nameToAccount) {
+        if (name2.indexOf(key2) !== -1 || key2.indexOf(name2) !== -1) {
+          result.toAccount = nameToAccount[key2];
+          break;
+        }
+      }
+      if (result.toAccount) break;
+    }
+  }
+
+  Logger.log('Extracted from description "' + description + '": from=' + result.fromAccount + ', to=' + result.toAccount);
+
+  return result;
 }
 
 /**
