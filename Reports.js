@@ -16,6 +16,16 @@ function formatNumber(num) {
 }
 
 /**
+ * تنسيق مبالغ مزدوجة العملة {SAR: x, EGP: y}
+ */
+function formatDualCurrency(amounts) {
+  var parts = [];
+  if (amounts.SAR) parts.push(formatNumber(amounts.SAR) + ' ر.س');
+  if (amounts.EGP) parts.push(formatNumber(amounts.EGP) + ' ج.م');
+  return parts.length > 0 ? parts.join(' + ') : '0';
+}
+
+/**
  * Get currency symbol
  * @param {string} currency - Currency code
  * @returns {string} Symbol
@@ -190,11 +200,11 @@ function generateAccountStatement(accountCode, month, year) {
       const nature = data[i][3];
       const item = data[i][5];
       const amount = parseFloat(data[i][6]) || 0;
-      const currency = data[i][7] || 'SAR';
+      const currency = normalizeCurrency(data[i][7]) || 'SAR';
       const fromAccount = data[i][8];
       const toAccount = data[i][9];
       const convertedAmount = parseFloat(data[i][10]) || 0;
-      const convertedCurrency = data[i][11];
+      const convertedCurrency = normalizeCurrency(data[i][11]) || '';
       const description = data[i][13];
 
       // Check if this transaction affects our account
@@ -300,13 +310,13 @@ function generateMonthlySummary(month, year) {
     let totalExpense = { SAR: 0, EGP: 0 };
     let totalTransfers = { SAR: 0, EGP: 0 };
 
-    const expensesByItem = {};
-    const incomeByItem = {};
-    const transfersByAccount = {};
+    const expensesByItem = {};      // {item: {SAR: x, EGP: y}}
+    const incomeByItem = {};        // {item: {SAR: x, EGP: y}}
+    const transfersByAccount = {};  // {account: {SAR: x, EGP: y}}
 
     // Transaction columns:
     // 0:ID, 1:Date, 2:Time, 3:Nature, 4:Category, 5:Item, 6:Amount, 7:Currency
-    // 8:FromAccount, 9:ToAccount
+    // 8:FromAccount, 9:ToAccount, 10:ConvertedAmount, 11:ConvertedCurrency, 12:ExchangeRate
 
     for (let i = 1; i < data.length; i++) {
       const rowDate = new Date(data[i][1]);
@@ -314,18 +324,34 @@ function generateMonthlySummary(month, year) {
         const nature = data[i][3];
         const item = data[i][5] || data[i][4];
         const amount = parseFloat(data[i][6]) || 0;
-        const currency = data[i][7] || 'SAR';
+        const currency = normalizeCurrency(data[i][7]) || 'SAR';
         const toAccount = data[i][9];
+        const convertedAmount = parseFloat(data[i][10]) || 0;
+        const convertedCurrency = normalizeCurrency(data[i][11]) || '';
 
         if (nature === 'إيراد') {
           totalIncome[currency] = (totalIncome[currency] || 0) + amount;
-          incomeByItem[item] = (incomeByItem[item] || 0) + amount;
+          if (!incomeByItem[item]) incomeByItem[item] = { SAR: 0, EGP: 0 };
+          incomeByItem[item][currency] = (incomeByItem[item][currency] || 0) + amount;
         } else if (nature === 'مصروف') {
           totalExpense[currency] = (totalExpense[currency] || 0) + amount;
-          expensesByItem[item] = (expensesByItem[item] || 0) + amount;
+          if (!expensesByItem[item]) expensesByItem[item] = { SAR: 0, EGP: 0 };
+          expensesByItem[item][currency] = (expensesByItem[item][currency] || 0) + amount;
         } else if (nature === 'تحويل') {
+          // المبلغ الأصلي (ما خرج من المصدر)
           totalTransfers[currency] = (totalTransfers[currency] || 0) + amount;
-          transfersByAccount[toAccount] = (transfersByAccount[toAccount] || 0) + amount;
+
+          // لكل حساب وجهة: نظهر المبلغ المحول إن وجد (ما وصل فعلاً)
+          if (toAccount) {
+            if (!transfersByAccount[toAccount]) transfersByAccount[toAccount] = { SAR: 0, EGP: 0 };
+            if (convertedAmount && convertedCurrency) {
+              // يوجد مبلغ محول - نستخدمه (ما استلمه الحساب فعلاً)
+              transfersByAccount[toAccount][convertedCurrency] = (transfersByAccount[toAccount][convertedCurrency] || 0) + convertedAmount;
+            } else {
+              // لا يوجد تحويل عملة - نستخدم المبلغ الأصلي
+              transfersByAccount[toAccount][currency] = (transfersByAccount[toAccount][currency] || 0) + amount;
+            }
+          }
         }
       }
     }
@@ -340,26 +366,40 @@ function generateMonthlySummary(month, year) {
     report += `💰 *الإيرادات:*\n`;
     if (totalIncome.SAR) report += `   ${formatNumber(totalIncome.SAR)} ر.س\n`;
     if (totalIncome.EGP) report += `   ${formatNumber(totalIncome.EGP)} ج.م\n`;
+    if (!totalIncome.SAR && !totalIncome.EGP) report += `   لا يوجد\n`;
     report += `\n`;
 
     // Expenses
     report += `💸 *المصروفات:*\n`;
     if (totalExpense.SAR) report += `   ${formatNumber(totalExpense.SAR)} ر.س\n`;
     if (totalExpense.EGP) report += `   ${formatNumber(totalExpense.EGP)} ج.م\n`;
+    if (!totalExpense.SAR && !totalExpense.EGP) report += `   لا يوجد\n`;
     report += `\n`;
 
     // Transfers
     report += `📤 *التحويلات:*\n`;
     if (totalTransfers.SAR) report += `   ${formatNumber(totalTransfers.SAR)} ر.س\n`;
     if (totalTransfers.EGP) report += `   ${formatNumber(totalTransfers.EGP)} ج.م\n`;
+    if (!totalTransfers.SAR && !totalTransfers.EGP) report += `   لا يوجد\n`;
     report += `\n`;
+
+    // Income breakdown
+    if (Object.keys(incomeByItem).length > 0) {
+      report += `📋 *الإيرادات حسب البند:*\n`;
+      for (const [item, amounts] of Object.entries(incomeByItem)) {
+        report += `   • ${item}: ${formatDualCurrency(amounts)}\n`;
+      }
+      report += `\n`;
+    }
 
     // Expenses breakdown
     if (Object.keys(expensesByItem).length > 0) {
       report += `📋 *المصروفات حسب البند:*\n`;
-      const sortedExpenses = Object.entries(expensesByItem).sort((a, b) => b[1] - a[1]);
-      sortedExpenses.slice(0, 10).forEach(([item, amount]) => {
-        report += `   • ${item}: ${formatNumber(amount)}\n`;
+      const sortedExpenses = Object.entries(expensesByItem).sort((a, b) => {
+        return (b[1].SAR + b[1].EGP) - (a[1].SAR + a[1].EGP);
+      });
+      sortedExpenses.slice(0, 10).forEach(([item, amounts]) => {
+        report += `   • ${item}: ${formatDualCurrency(amounts)}\n`;
       });
       report += `\n`;
     }
@@ -368,10 +408,10 @@ function generateMonthlySummary(month, year) {
     if (Object.keys(transfersByAccount).length > 0) {
       report += `👥 *التحويلات حسب الحساب:*\n`;
       const accounts = getAllAccounts();
-      for (const [accountCode, amount] of Object.entries(transfersByAccount)) {
+      for (const [accountCode, amounts] of Object.entries(transfersByAccount)) {
         const account = accounts.find(a => a.code === accountCode);
         const displayName = account ? account.name : accountCode;
-        report += `   • ${displayName}: ${formatNumber(amount)}\n`;
+        report += `   • ${displayName}: ${formatDualCurrency(amounts)}\n`;
       }
       report += `\n`;
     }
@@ -382,8 +422,9 @@ function generateMonthlySummary(month, year) {
 
     report += `━━━━━━━━━━━━━━━━━━━━━\n`;
     report += `📈 *صافي الشهر:*\n`;
-    report += `   ${formatNumber(netSAR)} ر.س\n`;
-    report += `   ${formatNumber(netEGP)} ج.م`;
+    if (netSAR !== 0) report += `   ${formatNumber(netSAR)} ر.س\n`;
+    if (netEGP !== 0) report += `   ${formatNumber(netEGP)} ج.م\n`;
+    if (netSAR === 0 && netEGP === 0) report += `   0\n`;
 
     return report;
 
